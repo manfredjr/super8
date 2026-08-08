@@ -50,7 +50,7 @@ Fica para depois:
 
 ### PHP puro com PDO, sem framework
 
-O sistema tem 7 tabelas e cerca de 8 telas. Laravel exigiria Composer instalado, DocumentRoot apontando para a pasta `public` e um cuidado extra na subida para o VPS. Em PHP puro a pasta vai inteira para `htdocs` no teste e para `_PUBLICAR\enviar` na producao, por FTP.
+O sistema tem 7 tabelas e cerca de 10 telas. Laravel exigiria Composer instalado, DocumentRoot apontando para a pasta `public` e um cuidado extra na subida para o VPS. Em PHP puro a pasta vai inteira para `htdocs` no teste e para `_PUBLICAR\enviar` na producao, por FTP.
 
 Na etapa 2, o OAuth do Google entra pela biblioteca oficial `google/apiclient` ou por chamada direta ao endpoint. Nao existe dependencia do Laravel Socialite que nao tenha equivalente.
 
@@ -73,27 +73,33 @@ super8/
   config/
     db.php            conexao PDO
     sessao.php        inicio de sessao com cookie seguro
-    csrf.php          geracao e conferencia de token
+    csrf.php          geracao e conferencia de token, funcao e()
+    acesso.php        usuario logado, exige login, exige dono do campeonato
   src/
     Sorteio.php       embaralha os 8 jogadores a partir da semente
     Rodizio.php       tabela fixa das 7 rodadas
     Campeonato.php    criacao, inscricao, geracao das rodadas
     Placar.php        gravacao de placar e classificacao do evento
     Ranking.php       agregacao entre eventos por periodo
-    Auth.php          cadastro, login, logout, checagem de dono
+    Auth.php          cadastro, login, bloqueio por tentativa, registro de aceite
   views/
-    layout.php  login.php  campeonatos.php  campeonato_form.php
-    inscricoes.php  chaveamento.php  placar.php  classificacao.php
-    ranking.php
+    layout.php  marca.php   login.php  campeonatos.php
+    campeonato_form.php     inscricoes.php  chaveamento.php
+    placar.php  classificacao.php  ranking.php
+    termo.php   privacidade.php
   public/
     index.php  login.php  logout.php  campeonato.php
     inscricoes.php  sortear.php  placar.php  ranking.php
-    css/  js/
+    termo.php  privacidade.php
+    css/
+  ferramentas/
+    sincronizar-htdocs.ps1  espelha a copia de teste no XAMPP
+    montar-pacote.ps1       monta _PUBLICAR\enviar, rodando a suite antes
   sql/
     schema.sql        criacao das tabelas
-    seed_demo.sql     campeonato de exemplo para teste
   testes/
-    teste_rodizio.php  teste_sorteio.php  teste_placar.php
+    13 arquivos teste_*.php, mais ajudantes _ajuda_*.php chamados
+    por subprocesso. O runner recolhe so teste_*.php.
 ```
 
 A pasta `src/` nao contem uma linha de HTML. Cada arquivo dela roda e e testado sem navegador.
@@ -113,6 +119,7 @@ A pasta `src/` nao contem uma linha de HTML. Cada arquivo dela roda e e testado 
 | senha_hash | VARCHAR(255) NULL | nulo em jogador convidado |
 | foto_url | VARCHAR(255) NULL | reservado para a etapa 2 |
 | e_organizador | TINYINT(1) DEFAULT 0 | |
+| ativo | TINYINT(1) DEFAULT 1 | `exigirLogin` rele esta coluna a cada requisicao; zerar corta a sessao de quem ja esta logado |
 | criado_em | DATETIME NOT NULL | |
 
 ### campeonatos
@@ -140,7 +147,7 @@ A pasta `src/` nao contem uma linha de HTML. Cada arquivo dela roda e e testado 
 | nome_exibicao | VARCHAR(120) NOT NULL | |
 | posicao_sorteio | TINYINT NULL | 1 a 8, preenchida no sorteio |
 
-Chave unica em (campeonato_id, posicao_sorteio) e em (campeonato_id, nome_exibicao).
+Chaves unicas em (campeonato_id, posicao_sorteio), em (campeonato_id, nome_exibicao) e em (campeonato_id, jogador_id). A terceira impede que a mesma conta seja inscrita duas vezes no mesmo campeonato sob nomes diferentes, o que dobraria os games dela no ranking sem nada aparecer na tela.
 
 ### rodadas
 
@@ -157,6 +164,8 @@ Chave unica em (campeonato_id, posicao_sorteio) e em (campeonato_id, nome_exibic
 | dupla_b_j1, dupla_b_j2 | INT NOT NULL FK inscricoes | |
 | games_a, games_b | TINYINT NULL | nulo enquanto nao jogada |
 | encerrada | TINYINT(1) DEFAULT 0 | |
+| gravado_por | INT UNSIGNED NULL | quem lancou o placar |
+| gravado_em | DATETIME NULL | quando |
 
 As partidas apontam para `inscricoes`, nao para `users`. Isso permite jogador convidado sem conta e mantem o placar preso ao evento.
 
@@ -210,7 +219,7 @@ Ao sortear, o sistema gera um inteiro aleatorio, grava em `campeonatos.seed_sort
 
 Guardar a semente torna o sorteio reproduzivel. Se alguem questionar o chaveamento, roda de novo com a mesma semente e chega no mesmo resultado.
 
-O sorteio so acontece com exatamente 8 inscricoes e muda o status do campeonato para `sorteado`. Refazer o sorteio apaga rodadas e partidas, entao so e permitido enquanto nenhum placar tiver sido lancado.
+O sorteio so acontece com exatamente 8 inscricoes. Ele muda o status para `sorteado` apenas se o status atual for `rascunho` ou `sorteado`; um resorteio de auditoria sobre evento `em_andamento` ou `encerrado` deixa o status como esta, para nao rebaixar em silencio um evento que ja andou. Refazer o sorteio apaga rodadas e partidas, entao so e permitido enquanto nenhum placar tiver sido lancado.
 
 ---
 
@@ -224,7 +233,9 @@ Classificacao do evento: soma dos games de cada jogador nas 7 partidas que dispu
 
 A alternativa seria ordenar pelo que veio primeiro do banco, que muda entre consultas e da a duas pessoas com o mesmo dado dois podios diferentes. Melhor a tela dizer que empatou.
 
-Ranking acumulado: mesma soma, agora entre campeonatos encerrados dentro do periodo escolhido. As colunas sao jogador, eventos disputados, games totais, media de games por evento e melhor colocacao. O filtro de periodo tem atalhos para mes atual, ano atual e intervalo livre.
+Ranking acumulado: mesma soma, agora entre campeonatos encerrados dentro do periodo escolhido. As colunas sao jogador, eventos disputados, jogos disputados, games, games sofridos, saldo e media de games por evento. O filtro de periodo tem atalhos para mes atual, ano atual e intervalo livre.
+
+Melhor colocacao nao entra. Ela exigiria recalcular a classificacao inteira de cada evento dentro da consulta agregada, e o custo nao se paga nesta etapa.
 
 O jogador so aparece no ranking entre eventos se tiver `jogador_id` preenchido, ou seja, conta de usuario. Convidado sem conta aparece na classificacao do evento dele e some do acumulado. Isso precisa estar avisado na tela de inscricao.
 
@@ -254,7 +265,7 @@ Todas pensadas para celular primeiro, porque o uso real acontece na beira da qua
 | CSRF | Token por sessao conferido em todo POST. Formulario sem token nao grava. |
 | Senha fraca ou vazada | `password_hash` com PASSWORD_ARGON2ID. Minimo de 8 caracteres. Nunca gravar senha em texto nem em log. |
 | Sequestro de sessao | Cookie com HttpOnly, SameSite Strict e Secure quando houver HTTPS. `session_regenerate_id` no login. |
-| Acesso a campeonato alheio | Toda leitura e escrita confere se `organizador_id` bate com o usuario da sessao. A checagem fica em `Auth.php` e e chamada no topo de cada ponto de entrada. |
+| Acesso a campeonato alheio | Toda leitura e escrita confere se `organizador_id` bate com o usuario da sessao. A checagem fica em `config/acesso.php`, e nao em `src/`, porque le sessao e escreve cabecalho, o que a restricao global proibe em `src/`. E chamada no topo de cada ponto de entrada. |
 | Forca bruta no login | Contador de tentativas por e-mail com espera crescente apos a quinta falha. |
 | Placar adulterado | Validacao de faixa nos games, de 0 a 99, e registro de quem gravou com data e hora. |
 

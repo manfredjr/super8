@@ -67,7 +67,7 @@ No servidor faltam tres passos, que o script lembra ao terminar: criar o `config
 - `src/` guarda as regras. Nenhuma linha de HTML, nenhuma chamada de sessao ou de cabecalho. Cada arquivo recebe a conexao e os valores por parametro, o que e o que torna os testes de linha de comando possiveis.
 - `config/` guarda conexao, sessao, token CSRF, escape de saida e controle de acesso. E aqui que mora o codigo que legitimamente toca sessao e cabecalho.
 - `views/` guarda as telas, `public/` os pontos de entrada.
-- `sql/schema.sql` cria as seis tabelas.
+- `sql/schema.sql` cria as sete tabelas.
 - `testes/` roda tudo. Arquivos comecando com `_ajuda_` sao auxiliares chamados por subprocesso, e nao testes; o nome e proposital, porque o runner so recolhe `teste_*.php`.
 - `ferramentas/` guarda os scripts de sincronizacao e empacotamento.
 

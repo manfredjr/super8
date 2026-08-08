@@ -8,3 +8,7 @@ Thumbs.db
 # _PUBLICAR/enviar e o pacote de subida, montado a partir do codigo versionado.
 _LIXEIRA/
 _PUBLICAR/
+
+# Preferencia local de permissao. Nao viaja com o repositorio de proposito:
+# quem clonar nao herda autorizacao de push desta maquina.
+.claude/settings.local.json

@@ -22,7 +22,13 @@ Nao apagar arquivo nenhum. Quando um arquivo precisar sair do lugar, mover para 
 
 ### Controle de versao
 
-Todo software desenvolvido aqui tem repositorio no GitHub associado. Cada alteracao vira um commit com mensagem que explica o que mudou. Commit e push so acontecem quando solicitado.
+Todo software desenvolvido aqui tem repositorio no GitHub associado. Neste projeto: `github.com/manfredjr/super8`, privado.
+
+Cada alteracao vira um commit com mensagem que explica o que mudou, e o push sai junto. Nao acumular trabalho local esperando um pedido: alteracao concluida e alteracao publicada.
+
+O que conta como concluida: o codigo funciona, a suite passa inteira, e a arvore esta limpa. Nunca dar push com teste vermelho nem com trabalho pela metade. Se a revisao apontou algo, o push espera a correcao.
+
+A autorizacao de push vive em `.claude/settings.local.json`, que nao entra no repositorio de proposito, para que ninguem que clone herde a permissao desta maquina.
 
 ### Os tres lugares, e o que e cada um
 

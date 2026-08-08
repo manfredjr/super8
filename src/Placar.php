@@ -3,38 +3,58 @@
 final class Placar
 {
     /**
-     * Grava o placar de uma partida.
+     * Grava o placar de uma partida de um campeonato.
      *
      * Grava um placar, ou seja, muda o estado do torneio - por isso segue o
      * mesmo contrato documentado no docblock de Campeonato::sortear: QUALQUER
      * codigo que grave um placar precisa travar a linha do campeonato (SELECT
-     * ... FOR UPDATE) antes de escrever, na mesma ordem que sortear(),
-     * inscrever() e removerInscricao() ja usam (campeonatos primeiro). Sem
-     * essa trava, um redesenho de sorteio concorrente poderia apagar as
-     * partidas (DELETE) enquanto este metodo ainda esta no meio de gravar um
-     * placar nelas, ou a guarda de sortear() (que le com FOR UPDATE se ja
-     * existe algum placar lancado) poderia nao enxergar esta escrita a tempo.
+     * ... FOR UPDATE) ANTES de qualquer outra trava, na mesma ordem que
+     * sortear(), inscrever() e removerInscricao() ja usam (campeonatos
+     * primeiro, sempre). Sem essa trava, um redesenho de sorteio concorrente
+     * poderia apagar as partidas (DELETE) enquanto este metodo ainda esta no
+     * meio de gravar um placar nelas, ou a guarda de sortear() (que le com
+     * FOR UPDATE se ja existe algum placar lancado) poderia nao enxergar
+     * esta escrita a tempo.
      *
-     * A partida so aponta para a rodada (partidas.rodada_id), nao para o
-     * campeonato direto - por isso o campeonato precisa ser resolvido antes
-     * da trava, com um JOIN partidas -> rodadas.
+     * $campeonatoId e parametro explicito (nao resolvido a partir da
+     * partida) por um motivo de ordem de travas, nao so de conveniencia: uma
+     * versao anterior deste metodo resolvia o campeonato com um JOIN
+     * partidas -> rodadas ANTES de travar o campeonato, o que trava a
+     * PARTIDA primeiro e o CAMPEONATO depois - a ordem invertida em relacao
+     * a sortear()/inscrever()/removerInscricao(). Isso e uma receita de
+     * deadlock real: a guarda de placar de sortear() trava TODAS as partidas
+     * do proprio campeonato (via COUNT(*) ... FOR UPDATE) logo depois de
+     * travar a linha do campeonato, no caminho normal, sem precisar de
+     * nenhum caso especial de tabela quase vazia. Se sortear() trava o
+     * campeonato e espera pela partida (que gravar() ja travou), e gravar()
+     * trava a partida e espera pelo campeonato (que sortear() ja travou), as
+     * duas transacoes ficam esperando uma pela outra para sempre, ate o
+     * MariaDB detectar o ciclo e destruir uma das duas (SQLSTATE 40001,
+     * erro 1213) - e um deadlock derruba a TRANSACAO INTEIRA no servidor,
+     * nao so a instrucao que causou o erro; se gravar() estiver rodando
+     * dentro da transacao de quem chama, todo o trabalho anterior dessa
+     * transacao e perdido, mesmo que $pdo->inTransaction() continue
+     * devolvendo true (esse metodo so reflete o que o PDO acha que tem, nao
+     * pergunta ao servidor) e um commit() seguinte nao avise que nao havia
+     * mais nada para comitar. Recebendo $campeonatoId pronto, este metodo
+     * pode travar o campeonato PRIMEIRO em todo caminho, sem excecao,
+     * restaurando a ordem "campeonatos primeiro" de verdade.
      *
-     * Essa resolucao usa uma leitura TRAVADA (FOR UPDATE), nao uma leitura
-     * comum: sob REPEATABLE READ, uma transacao de quem chama cujo retrato
-     * seja anterior a criacao desta partida (por exemplo, comecou antes do
-     * sorteio que a criou) NUNCA enxergaria essa linha com uma leitura
-     * comum, mesmo que ela ja exista de verdade no banco - o retrato fica
-     * congelado no inicio da transacao. Se a resolucao usasse leitura
-     * comum, o "if" que trava o campeonato simplesmente nao disparava
-     * nesse caso, e o UPDATE mais abaixo (que E uma leitura corrente,
-     * enxerga a linha independente do retrato) ainda gravava o placar -
-     * furando o contrato de Campeonato::sortear por completo, sem trava
-     * nenhuma. Se a partida nao existir de verdade (nem com leitura
-     * travada), a excecao abaixo interrompe antes de qualquer UPDATE, em
-     * vez de deixar um UPDATE que nao vai casar com nenhuma linha (ou pior,
-     * casar com uma linha que nunca foi travada).
+     * A confirmacao de que a partida pertence a ESTE campeonato (linha
+     * abaixo, com WHERE p.id = ? AND r.campeonato_id = ?) continua sendo uma
+     * leitura TRAVADA (FOR UPDATE), pelo mesmo motivo de antes: sob
+     * REPEATABLE READ, uma transacao de quem chama cujo retrato seja
+     * anterior a criacao desta partida nunca a enxergaria com leitura comum,
+     * mesmo que ela ja exista de verdade no banco. Uma leitura travada
+     * ignora esse retrato. Essa mesma consulta tambem cobre o controle de
+     * posse de graca: se o id de partida informado pertencer a OUTRO
+     * campeonato, a consulta nao acha nada e a excecao dispara com a MESMA
+     * mensagem de "nao existe" - quem chama (por exemplo, um controller que
+     * ja resolveu e autorizou o campeonato antes de chamar este metodo) nao
+     * consegue usar a mensagem de erro para descobrir se aquele id de
+     * partida existe em outro campeonato alheio.
      */
-    public static function gravar(PDO $pdo, int $partidaId, int $gamesA, int $gamesB, int $usuarioId): void
+    public static function gravar(PDO $pdo, int $campeonatoId, int $partidaId, int $gamesA, int $gamesB, int $usuarioId): void
     {
         if ($gamesA < 0 || $gamesA > 99 || $gamesB < 0 || $gamesB > 99) {
             throw new InvalidArgumentException('Os games precisam ficar entre 0 e 99.');
@@ -49,18 +69,20 @@ final class Placar
         }
 
         try {
-            $buscaCampeonato = $pdo->prepare(
-                'SELECT r.campeonato_id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE p.id = ? FOR UPDATE'
-            );
-            $buscaCampeonato->execute([$partidaId]);
-            $campeonatoId = $buscaCampeonato->fetchColumn();
-
-            if ($campeonatoId === false) {
-                throw new RuntimeException('A partida informada nao existe.');
+            $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
+            $trava->execute([$campeonatoId]);
+            if ($trava->fetchColumn() === false) {
+                throw new RuntimeException('O campeonato informado nao existe.');
             }
 
-            $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
-            $trava->execute([(int) $campeonatoId]);
+            $confirmaPartida = $pdo->prepare(
+                'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
+                 WHERE p.id = ? AND r.campeonato_id = ? FOR UPDATE'
+            );
+            $confirmaPartida->execute([$partidaId, $campeonatoId]);
+            if ($confirmaPartida->fetchColumn() === false) {
+                throw new RuntimeException('A partida informada nao existe neste campeonato.');
+            }
 
             $comando = $pdo->prepare(
                 'UPDATE partidas SET games_a = ?, games_b = ?, encerrada = 1, gravado_por = ?, gravado_em = NOW()

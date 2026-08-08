@@ -94,7 +94,7 @@ $marcador = fgets($canos[1]);
 Teste::igual("TRAVA_OK\n", $marcador, 'o processo auxiliar avisa quando ja segura a trava do campeonato');
 
 $inicio = microtime(true);
-Placar::gravar($pdo, $idPrimeiraPartida, 6, 2, $organizadorId);
+Placar::gravar($pdo, $campeonatoId, $idPrimeiraPartida, 6, 2, $organizadorId);
 $duracaoBloqueio = microtime(true) - $inicio;
 
 // Mesma ressalva do teste analogo em Campeonato: o tempo sozinho nao isola
@@ -131,18 +131,21 @@ Teste::igual(1, (int) $linhaLida['encerrada'], 'depois de destravar, a partida f
 
 // --- Cenario 2: gravar() com um retrato (snapshot) anterior a criacao da
 // partida ainda assim trava, nunca escreve destravado ------------------------
-// Achado da revisao (Important 3): a resolucao do campeonato a partir da
-// partida usava uma leitura COMUM. Sob REPEATABLE READ, uma transacao de
-// quem chama cujo retrato seja anterior ao sorteio que criou aquela partida
-// nunca a enxergaria com leitura comum - o retrato fica congelado no inicio
-// da transacao, mesmo que a linha ja exista de verdade no banco (comitada por
-// outra conexao depois). Isso fazia o "if" que trava o campeonato nem
-// disparar, e o UPDATE final (que E uma leitura corrente, enxerga a linha
-// igual) gravava o placar mesmo assim - sem NENHUMA trava. O revisor
-// reproduziu isso ao vivo: gravar() voltando em 0.001s enquanto outra conexao
-// segurava a trava do campeonato por 3s. A correcao troca a leitura de
-// resolucao por uma leitura TRAVADA (FOR UPDATE), que ignora o retrato e le o
-// dado comitado mais recente.
+// Achado original da revisao (Important 3, agora reconfirmado apos gravar()
+// passar a receber $campeonatoId como parametro, em vez de resolve-lo a
+// partir da partida): tanto a trava do campeonato (passo 1) quanto a
+// confirmacao de que a partida pertence a ele (passo 2, com JOIN partidas ->
+// rodadas) sao leituras TRAVADAS (FOR UPDATE), incondicionais - nenhuma das
+// duas fica atras de um "if" que possa deixar de disparar. Isso importa
+// porque sob REPEATABLE READ, uma transacao de quem chama cujo retrato seja
+// anterior a CRIACAO do campeonato/sorteio nunca enxergaria essas linhas com
+// uma leitura comum - o retrato fica congelado no inicio da transacao, mesmo
+// que as linhas ja existam de verdade no banco (comitadas por outra conexao
+// depois). Na versao com o defeito original (antes desta tarefa), isso fazia
+// a trava do campeonato nem disparar, e o UPDATE final (que E uma leitura
+// corrente, enxerga a linha igual) gravava o placar mesmo assim - sem
+// NENHUMA trava. O revisor reproduziu isso ao vivo: gravar() voltando em
+// 0.001s enquanto outra conexao segurava a trava do campeonato por 3s.
 
 $pdo->beginTransaction();
 // Leitura comum qualquer, ANTES do campeonato/sorteio existirem: fixa o
@@ -209,7 +212,7 @@ $marcador2 = fgets($canos2[1]);
 Teste::igual("TRAVA_OK\n", $marcador2, 'o segundo processo auxiliar avisa quando ja segura a trava do campeonato');
 
 $inicio2 = microtime(true);
-Placar::gravar($pdo, $idPartidaRetratoAntigo, 6, 1, $organizadorId2);
+Placar::gravar($pdo, $campeonatoRetratoAntigo, $idPartidaRetratoAntigo, 6, 1, $organizadorId2);
 $duracao2 = microtime(true) - $inicio2;
 
 // Esta e a asserticao central do cenario: mesmo com o retrato antigo (que

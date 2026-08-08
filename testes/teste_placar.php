@@ -488,10 +488,29 @@ Teste::verdade($porId[1003]['empatado'], '1003 fica marcado como empatado dentro
 // confronto realmente ordena) passaria pelo teste do ciclo e por este ao
 // mesmo tempo passaria por "sorte", nunca provando que o desempate por
 // confronto continua funcionando quando ele de fato decide.
+// Os nomes de 2001/2002/2003 sao escolhidos DE PROPOSITO para discordar do
+// confronto direto: 2001 vence o confronto (bate os outros dois) mas recebe
+// o nome que vem POR ULTIMO por ordem alfabetica ("Zulu"); 2003 nao vence
+// ninguem no confronto mas recebe o nome que vem PRIMEIRO ("Alfa"). Com os
+// ids "Jogador 2001/2002/2003" originais, a ordem alfabetica (2001 < 2002 <
+// 2003) coincidia por acaso com a ordem do confronto, entao esta asserticao
+// passaria mesmo com o bloco de confronto inteiro apagado do comparador -
+// exatamente a armadilha que o achado Important 1 da revisao apontou. Com
+// os nomes invertidos, so o confronto direto pode produzir esta ordem.
 $grupoOrdenado = [];
 foreach ([2001, 2002, 2003, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027] as $id) {
     $grupoOrdenado[] = ['id' => $id, 'nome_exibicao' => "Jogador {$id}"];
 }
+foreach ($grupoOrdenado as &$linhaGrupoOrdenado) {
+    if ($linhaGrupoOrdenado['id'] === 2001) {
+        $linhaGrupoOrdenado['nome_exibicao'] = 'Jogador Zulu';
+    } elseif ($linhaGrupoOrdenado['id'] === 2002) {
+        $linhaGrupoOrdenado['nome_exibicao'] = 'Jogador Meio';
+    } elseif ($linhaGrupoOrdenado['id'] === 2003) {
+        $linhaGrupoOrdenado['nome_exibicao'] = 'Jogador Alfa';
+    }
+}
+unset($linhaGrupoOrdenado);
 $partidasGrupoOrdenado = [
     // 2001 bate 2002 no confronto direto.
     [
@@ -546,9 +565,13 @@ foreach ([2001, 2002, 2003] as $id) {
 
 $ids = array_column($linhas, 'inscricao_id');
 Teste::verdade(
+    strcmp('Jogador Zulu', 'Jogador Meio') > 0 && strcmp('Jogador Meio', 'Jogador Alfa') > 0,
+    'checagem do proprio teste: por nome, a ordem seria o CONTRARIO da ordem esperada por confronto (Alfa, Meio, Zulu) - se esta asserticao falhar, o teste abaixo nao prova mais nada'
+);
+Teste::verdade(
     array_search(2001, $ids, true) < array_search(2002, $ids, true)
         && array_search(2002, $ids, true) < array_search(2003, $ids, true),
-    'o confronto direto ordena o grupo inteiro (2001, depois 2002, depois 2003)'
+    'o confronto direto ordena o grupo inteiro (2001 "Zulu", depois 2002 "Meio", depois 2003 "Alfa") mesmo com os nomes na ordem alfabetica contraria: so o confronto pode ter produzido esta ordem'
 );
 Teste::verdade(!$porId[2001]['empatado'], '2001 nao fica marcado como empatado: o confronto direto ordena o grupo inteiro');
 Teste::verdade(!$porId[2002]['empatado'], '2002 nao fica marcado como empatado: o confronto direto ordena o grupo inteiro');

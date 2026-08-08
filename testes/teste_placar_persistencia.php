@@ -41,7 +41,7 @@ $idPrimeiraPartida = (int) $linhasPartidas[0]['id'];
 foreach ([[-1, 3], [3, -1], [100, 3], [3, 100]] as [$gA, $gB]) {
     $erro = null;
     try {
-        Placar::gravar($pdo, $idPrimeiraPartida, $gA, $gB, $organizadorId);
+        Placar::gravar($pdo, $campeonatoId, $idPrimeiraPartida, $gA, $gB, $organizadorId);
     } catch (InvalidArgumentException $excecao) {
         $erro = $excecao->getMessage();
     }
@@ -54,7 +54,7 @@ foreach ([[-1, 3], [3, -1], [100, 3], [3, 100]] as [$gA, $gB]) {
 
 // Os limites 0 e 99 propriamente ditos tem que ser aceitos (validacao usa <
 // e >, nao <= e >=).
-Placar::gravar($pdo, $idPrimeiraPartida, 0, 99, $organizadorId);
+Placar::gravar($pdo, $campeonatoId, $idPrimeiraPartida, 0, 99, $organizadorId);
 $lida = $pdo->prepare('SELECT games_a, games_b, encerrada, gravado_por, gravado_em FROM partidas WHERE id = ?');
 $lida->execute([$idPrimeiraPartida]);
 $linhaLida = $lida->fetch();
@@ -69,30 +69,105 @@ Teste::verdade($linhaLida['gravado_em'] !== null, 'gravar registra o horario');
 // guard, gravar nao pode tentar abrir uma segunda transacao aninhada, que o
 // PDO/MariaDB nao suportam do jeito que o codigo assume.)
 Teste::verdade($pdo->inTransaction(), 'o teste ja esta dentro de uma transacao (a de fora)');
-Placar::gravar($pdo, $idPrimeiraPartida, 6, 4, $organizadorId);
+Placar::gravar($pdo, $campeonatoId, $idPrimeiraPartida, 6, 4, $organizadorId);
 Teste::verdade($pdo->inTransaction(), 'gravar chamado dentro de uma transacao existente nao fecha essa transacao');
 $lida->execute([$idPrimeiraPartida]);
 $linhaLida = $lida->fetch();
 Teste::igual(6, (int) $linhaLida['games_a'], 'a gravacao seguinte, dentro da mesma transacao do chamador, atualiza o placar');
 Teste::igual(4, (int) $linhaLida['games_b'], 'games_b tambem atualiza');
 
-// gravar() com um id de partida que nao existe tem que lancar RuntimeException,
-// nao silenciar num UPDATE de 0 linhas: a resolucao do campeonato agora usa
-// leitura travada (FOR UPDATE), e se ela nao acha nada, e porque a partida
-// de verdade nao existe (nao um retrato antigo escondendo uma linha real) -
+// gravar() com um id de campeonato que nao existe tem que lancar
+// RuntimeException, travando nada: e o primeiro passo do metodo agora
+// (campeonato primeiro, sempre), entao nem chega a olhar a partida.
+$erroCampeonatoInexistente = null;
+try {
+    Placar::gravar($pdo, 999999999, $idPrimeiraPartida, 6, 3, $organizadorId);
+} catch (RuntimeException $excecao) {
+    $erroCampeonatoInexistente = $excecao->getMessage();
+}
+Teste::igual(
+    'O campeonato informado nao existe.',
+    $erroCampeonatoInexistente,
+    'gravar com id de campeonato inexistente lanca RuntimeException'
+);
+
+// gravar() com um id de partida que nao existe (em lugar nenhum) tem que
+// lancar RuntimeException, nao silenciar num UPDATE de 0 linhas: a
+// confirmacao de que a partida pertence ao campeonato agora usa leitura
+// travada (FOR UPDATE), e se ela nao acha nada, e porque a partida de
+// verdade nao existe (nao um retrato antigo escondendo uma linha real) -
 // deixar passar para o UPDATE final gravaria um placar numa partida que
 // nunca foi travada, ou simplesmente nao faria nada em silencio.
 $erroPartidaInexistente = null;
 try {
-    Placar::gravar($pdo, 999999999, 6, 3, $organizadorId);
+    Placar::gravar($pdo, $campeonatoId, 999999999, 6, 3, $organizadorId);
 } catch (RuntimeException $excecao) {
     $erroPartidaInexistente = $excecao->getMessage();
 }
 Teste::igual(
-    'A partida informada nao existe.',
+    'A partida informada nao existe neste campeonato.',
     $erroPartidaInexistente,
     'gravar com id de partida inexistente lanca RuntimeException, em vez de um UPDATE silencioso de 0 linhas'
 );
+
+// --- gravar() recusa uma partida que existe, mas pertence a OUTRO
+// campeonato (controle de posse "de graca") -------------------------------
+// $campeonatoId ser parametro explicito (em vez de resolvido a partir da
+// partida) da o controle de posse de graca: a confirmacao
+// "WHERE p.id = ? AND r.campeonato_id = ?" nao acha nada tanto para um id de
+// partida que nao existe em lugar nenhum quanto para um id de partida que
+// existe, mas pertence a outro campeonato - e por isso as DUAS situacoes
+// tem que produzir exatamente a MESMA mensagem de erro. Se as mensagens
+// fossem diferentes, um organizador mal-intencionado poderia usar a
+// diferenca para descobrir, testando ids de partida a esmo, se um id
+// especifico existe em outro campeonato alheio (um oraculo de existencia).
+$campeonatoAlheio = Campeonato::criar($pdo, $organizadorId, [
+    'nome'        => 'Campeonato alheio para testar posse',
+    'data_evento' => '2026-09-11',
+    'local'       => 'Arena Alheia',
+    'custo'       => '',
+    'descricao'   => '',
+]);
+foreach (range(1, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoAlheio, "Jogador alheio {$numero}", null);
+}
+Campeonato::sortear($pdo, $campeonatoAlheio, 3333);
+$buscaPartidaAlheia = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ? ORDER BY r.numero, p.quadra LIMIT 1'
+);
+$buscaPartidaAlheia->execute([$campeonatoAlheio]);
+$idPartidaAlheia = (int) $buscaPartidaAlheia->fetchColumn();
+
+$erroPartidaAlheia = null;
+try {
+    // Passa o campeonato de TESTE ($campeonatoId), mas o id de uma partida
+    // que pertence ao campeonato ALHEIO ($campeonatoAlheio) - exatamente o
+    // que um controller que ja resolveu e autorizou o campeonato errado
+    // receberia se alguem tentasse gravar um placar usando o id de partida
+    // de outro organizador.
+    Placar::gravar($pdo, $campeonatoId, $idPartidaAlheia, 6, 3, $organizadorId);
+} catch (RuntimeException $excecao) {
+    $erroPartidaAlheia = $excecao->getMessage();
+}
+Teste::igual(
+    'A partida informada nao existe neste campeonato.',
+    $erroPartidaAlheia,
+    'gravar recusa uma partida que pertence a outro campeonato'
+);
+Teste::igual(
+    $erroPartidaInexistente,
+    $erroPartidaAlheia,
+    'a mensagem de erro e IDENTICA para "partida nao existe em lugar nenhum" e "partida existe, mas e de outro campeonato" - nao da para diferenciar os dois casos pela mensagem'
+);
+
+// A partida do campeonato alheio continua sem placar: a rejeicao acima nao
+// escreveu nada nela por engano.
+$confereNaoEscreveu = $pdo->prepare('SELECT games_a, games_b, encerrada FROM partidas WHERE id = ?');
+$confereNaoEscreveu->execute([$idPartidaAlheia]);
+$linhaNaoEscrita = $confereNaoEscreveu->fetch();
+Teste::igual(null, $linhaNaoEscrita['games_a'], 'a partida do campeonato alheio continua sem games_a depois da tentativa recusada');
+Teste::igual(null, $linhaNaoEscrita['games_b'], 'a partida do campeonato alheio continua sem games_b depois da tentativa recusada');
+Teste::igual(0, (int) $linhaNaoEscrita['encerrada'], 'a partida do campeonato alheio continua nao encerrada depois da tentativa recusada');
 
 // --- Torneio completo: as 14 partidas, conferidas a mao -------------------
 // Os resultados abaixo foram somados partida a partida, na mao, para as
@@ -123,7 +198,7 @@ foreach ($linhasPartidas as $linha) {
     $numero = (int) $linha['numero'];
     $quadra = (int) $linha['quadra'];
     [$gamesA, $gamesB] = $placarPorRodada[$numero][$quadra];
-    Placar::gravar($pdo, (int) $linha['id'], $gamesA, $gamesB, $organizadorId);
+    Placar::gravar($pdo, $campeonatoId, (int) $linha['id'], $gamesA, $gamesB, $organizadorId);
     $idsPartidasGravadas[] = (int) $linha['id'];
 }
 Teste::igual(14, count($idsPartidasGravadas), 'gravou o placar das 14 partidas');

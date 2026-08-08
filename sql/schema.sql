@@ -21,6 +21,16 @@ CREATE TABLE IF NOT EXISTS tentativas_login (
   bloqueado_ate DATETIME NULL
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS aceites_termo (
+  id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id   INT UNSIGNED NOT NULL,
+  versao    VARCHAR(20) NOT NULL,
+  aceito_em DATETIME NOT NULL,
+  ip        VARCHAR(45) NULL,
+  CONSTRAINT fk_aceite_user FOREIGN KEY (user_id) REFERENCES users(id),
+  UNIQUE KEY uk_user_versao (user_id, versao)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS campeonatos (
   id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   organizador_id INT UNSIGNED NOT NULL,

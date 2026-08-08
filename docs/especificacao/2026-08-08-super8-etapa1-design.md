@@ -1,7 +1,27 @@
 # Super 8 Padel - Especificacao da etapa 1
 
+Produto da MT - Manfred Tecnologia.
+
 Data: 08/08/2026
 Escopo: motor do Super 8 mais ranking acumulado, sem login com Google.
+
+---
+
+## 0. O produto e o modelo
+
+O Super 8 e produto da MT - Manfred Tecnologia, e existe para trazer cliente para a MT.
+
+O uso e gratuito, para o competidor e para quem cria a competicao. Nao ha plano pago nem cobranca por evento. O retorno vem por publicidade: em troca do uso gratuito, a MT figura como apoiadora e patrocinadora de cada campeonato criado na plataforma.
+
+**O que isso exige do produto.** A marca da MT nao e um selo solto no rodape de uma tela. Ela aparece em toda superficie que o competidor ve: pagina do evento, chaveamento, classificacao e ranking. E o que o organizador esta contratando ao usar de graca, e por isso e requisito, nao enfeite.
+
+Com um limite que vem do uso real: o chaveamento e a tela de placar sao usados na beira da quadra, no celular, entre partidas. Marca que rouba espaco da informacao do jogo estraga as duas coisas ao mesmo tempo, porque o organizador abandona a ferramenta e a publicidade deixa de alcancar alguem. A marca fica presente e identificavel, nunca competindo com o placar.
+
+**O que isso exige juridicamente, e nao e opcional.** Usar nome de pessoa e nome de evento com finalidade publicitaria precisa de base legal e de aviso aceito, nao presumido. Um sistema que simplesmente assume o consentimento fica exposto, e o problema aparece justamente quando o modelo estiver funcionando e alguem reclamar.
+
+Por isso o cadastro do organizador passa por termo de uso com aceite registrado, e o aceite fica gravado com versao e data. Detalhe na secao 4 e na secao 10.
+
+O competidor sem conta, cadastrado pelo organizador apenas pelo nome, nao aceita nada, porque nao tem cadastro. Quem responde por ele e o organizador, que aceitou o termo e se compromete a informar os jogadores que inscreve. Isso precisa estar escrito no proprio termo, e a tela de inscricao precisa dizer ao organizador que essa responsabilidade e dele.
 
 ---
 
@@ -9,13 +29,14 @@ Escopo: motor do Super 8 mais ranking acumulado, sem login com Google.
 
 Entra nesta etapa:
 
-- Cadastro e login do organizador por e-mail e senha.
+- Cadastro e login do organizador por e-mail e senha, com termo de uso aceito e registrado.
 - Criacao de campeonato com nome, data, local, custo e descricao.
 - Cadastro dos 8 competidores de cada campeonato.
 - Sorteio com semente gravada e geracao automatica das 7 rodadas.
 - Lancamento de placar das 14 partidas.
 - Classificacao do evento por games vencidos.
 - Ranking acumulado entre eventos, com filtro por periodo.
+- Marca da MT como apoiadora do evento nas telas que o competidor ve.
 
 Fica para depois:
 
@@ -145,6 +166,24 @@ O ranking acumulado nao tem tabela. Sai de consulta agregada sobre `partidas` ju
 
 `email` PK, `tentativas` TINYINT, `bloqueado_ate` DATETIME nulo. Tabela de apoio para o bloqueio por forca bruta descrito na secao 9. Nao guarda dado pessoal alem do e-mail digitado na tentativa e pode ser esvaziada a qualquer momento.
 
+### aceites_termo
+
+| coluna | tipo | observacao |
+|---|---|---|
+| id | INT UNSIGNED AUTO_INCREMENT PK | |
+| user_id | INT UNSIGNED NOT NULL FK users | |
+| versao | VARCHAR(20) NOT NULL | versao do termo aceito |
+| aceito_em | DATETIME NOT NULL | |
+| ip | VARCHAR(45) NULL | comporta IPv4 e IPv6 |
+
+Chave unica em (user_id, versao).
+
+**Por que tabela e nao coluna em `users`.** O termo vai mudar, e quando mudar e preciso saber quem aceitou qual versao e quando. Uma coluna seria sobrescrita no primeiro reaceite, e junto com ela a prova de que a versao anterior foi aceita. Tabela guarda o historico, que e exatamente o que serve de evidencia se alguem questionar.
+
+A versao do termo em vigor fica em constante na configuracao. No login, se a versao aceita pelo usuario for menor que a em vigor, ele passa pela tela de aceite antes de continuar.
+
+O `ip` e dado pessoal, e esta ali de proposito: sem ele o registro de aceite vale pouco como evidencia. A finalidade e estritamente essa, e o campo aceita nulo para o caso de o endereco nao estar disponivel.
+
 ---
 
 ## 5. Rodizio das 7 rodadas
@@ -235,17 +274,39 @@ Levantados na revisao da camada de autenticacao. Ficam registrados porque sao de
 
 ## 10. LGPD
 
-Dados pessoais tratados: nome e e-mail do organizador, nome de exibicao do jogador e, quando ele tem conta, e-mail.
+Dados pessoais tratados: nome e e-mail do organizador, nome de exibicao do jogador e, quando ele tem conta, e-mail. Mais o IP no momento do aceite do termo, guardado como evidencia do aceite e para nada mais.
 
-Base legal: execucao de contrato para o organizador, que se cadastra por vontade propria. Para o jogador inscrito por terceiro, legitimo interesse na organizacao do torneio, com aviso visivel na tela de inscricao informando que o nome aparecera em chaveamento, classificacao e ranking publico.
+### Base legal, e por que o modelo de negocio muda a analise
 
-Minimizacao: jogador convidado entra apenas com nome de exibicao. O sistema nao pede telefone, documento nem data de nascimento, porque nao precisa deles para nada.
+Uma versao anterior deste documento dizia que nao havia uso para publicidade. Isso deixou de ser verdade quando o modelo passou a ser uso gratuito em troca de a MT figurar como apoiadora dos eventos. A frase foi corrigida porque uma declaracao de privacidade errada e pior do que declaracao nenhuma.
 
-Direitos do titular: exclusao a pedido troca o nome de exibicao por um identificador anonimo e mantem os placares, que sao dado estatistico do evento e nao identificam mais ninguem. A conta de usuario e desativada, nao apagada, conforme a regra do projeto que proibe exclusao.
+**Organizador:** execucao de contrato, com aceite de termo registrado. O contrato e explicito e e o proprio modelo: ele usa o sistema de graca, e em troca a MT aparece como apoiadora do campeonato que ele criar. O aceite fica gravado com versao, data e IP na tabela `aceites_termo`.
 
-Politica de privacidade: obrigatoria a partir da etapa 2, quando o Google passar a devolver e-mail e foto. Nesta etapa fica um aviso curto de tratamento de dados na tela de cadastro.
+**Jogador inscrito pelo organizador, sem conta:** legitimo interesse na organizacao do torneio, com aviso na tela de inscricao. Vale distinguir duas coisas que se confundem facil: o nome do jogador aparece porque ele esta jogando, e nao para endossar a MT. A marca da MT esta na pagina como patrocinadora do evento, do mesmo jeito que um banner de patrocinador aparece atras da quadra num torneio presencial. O dado do jogador serve para rodar o torneio; a marca convive com ele na mesma pagina.
 
-Retencao: dados de campeonato ficam enquanto o organizador mantiver a conta ativa. Nao ha compartilhamento com terceiros nem uso para publicidade.
+Essa distincao e o que sustenta o legitimo interesse. Se em algum momento o produto passar a usar nome ou imagem de jogador em peca publicitaria da MT, em anuncio, post ou material de venda, a base legal muda: ali passa a ser consentimento especifico, de cada jogador, e legitimo interesse nao cobre.
+
+**Responsabilidade de informar.** O jogador sem conta nao aceita nada, porque nao tem cadastro. Quem responde por informar esse jogador e o organizador, e isso precisa estar escrito no termo que ele aceita e visivel na tela de inscricao. Nao e detalhe de texto: e o que liga o aviso a alguem que pode de fato dar o aviso.
+
+### Pendencia que nao e tecnica
+
+O modelo de negocio depende dessa analise estar certa, e ela foi feita por quem escreve software, nao por quem exerce advocacia. Antes de abrir o sistema para organizadores que nao sejam voce, o termo de uso e essa secao merecem leitura de um advogado. O custo de descobrir um erro aqui depois de o produto estar rodando com clientes reais e muito maior do que o de uma revisao agora.
+
+### Minimizacao
+
+Jogador convidado entra apenas com nome de exibicao. O sistema nao pede telefone, documento nem data de nascimento, porque nao precisa deles para nada.
+
+### Direitos do titular
+
+Exclusao a pedido troca o nome de exibicao por um identificador anonimo e mantem os placares, que sao dado estatistico do evento e nao identificam mais ninguem. A conta de usuario e desativada, nao apagada, conforme a regra do projeto que proibe exclusao.
+
+### Politica de privacidade
+
+Obrigatoria desde esta etapa, e nao mais a partir da etapa 2 como este documento dizia antes. A razao mudou: com finalidade publicitaria no modelo, a pessoa precisa poder ler onde seu dado vai antes de aceitar. O termo aceito no cadastro cumpre isso, e a politica fica acessivel por link em toda tela publica.
+
+### Retencao
+
+Dados de campeonato ficam enquanto o organizador mantiver a conta ativa. Nao ha venda de dado, nao ha compartilhamento com terceiros, e nao ha envio de dado de jogador para nenhum servico de publicidade. O ganho publicitario da MT vem de a marca dela aparecer, e nao de o dado de alguem sair do sistema. Essa e uma distincao que precisa continuar verdadeira conforme o produto crescer.
 
 ---
 

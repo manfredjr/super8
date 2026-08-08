@@ -1,8 +1,18 @@
 # Super 8 Padel
 
+Produto da **MT - Manfred Tecnologia**.
+
 Sistema de torneios de padel no formato Super 8. Oito jogadores, 7 rodadas, todos jogam com e contra todos, pontuacao individual por games vencidos.
 
 Etapa atual: motor do torneio e ranking acumulado, com login por e-mail e senha. O login com Google fica para a etapa 2, e a modelagem ja nasceu preparada para ele.
+
+## Modelo
+
+Gratuito para o competidor e para quem cria a competicao. Nao ha plano pago nem cobranca por evento.
+
+Em troca do uso gratuito, a MT figura como apoiadora e patrocinadora de cada campeonato criado na plataforma, com marca visivel na pagina do evento, no chaveamento, na classificacao e no ranking. Quem cria um campeonato aceita isso no cadastro, por termo de uso registrado.
+
+Codigo fechado. Repositorio privado, publicacao na infraestrutura da MT.
 
 ## Os tres lugares
 
@@ -63,7 +73,6 @@ No servidor faltam tres passos, que o script lembra ao terminar: criar o `config
 
 ## Documentacao
 
-- `CLAUDE.md` traz as regras de trabalho no projeto.
 - `projeto-super8-padel.md` traz os requisitos originais do sistema.
-- `docs/superpowers/specs/` traz o desenho da etapa: modelagem, decisoes de arquitetura com o motivo de cada uma, analise de seguranca, analise de LGPD e a lista dos limites aceitos.
-- `docs/superpowers/plans/` traz o plano de implementacao tarefa por tarefa.
+- `docs/especificacao/` traz o desenho da etapa: modelagem, decisoes de arquitetura com o motivo de cada uma, analise de seguranca, analise de LGPD e a lista dos limites aceitos.
+- `docs/plano/` traz o plano de implementacao tarefa por tarefa.

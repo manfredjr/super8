@@ -504,6 +504,18 @@ esperaRecusaCriar($pdo, $organizadorId, ['data_evento' => '31/12/2026'] + $dados
 esperaRecusaCriar($pdo, $organizadorId, ['nome' => '   '] + $dadosBaseValidos, 'C2: recusa nome so com espacos (antes gravava string vazia)');
 esperaRecusaCriar($pdo, $organizadorId, ['custo' => 'de graca'] + $dadosBaseValidos, 'C2: recusa custo nao numerico (antes gravava 0.00)');
 
+// Pequena 2 (segunda rodada de revisao): validarCusto so recusava
+// nao-numerico. custo e DECIMAL(10,2), sem modo estrito: negativo passava
+// (custo de evento nao existe abaixo de zero) e um valor como 99999999999
+// gravava truncado em 99999999.99 em silencio, em vez de recusado.
+esperaRecusaCriar($pdo, $organizadorId, ['custo' => '-50'] + $dadosBaseValidos, 'C2: recusa custo negativo');
+esperaRecusaCriar($pdo, $organizadorId, ['custo' => '99999999999'] + $dadosBaseValidos, 'C2: recusa custo maior do que DECIMAL(10,2) comporta (antes gravava truncado em 99999999.99)');
+
+// O limite exato ainda e aceito (o maior valor que DECIMAL(10,2) comporta).
+$idCustoLimite = Campeonato::criar($pdo, $organizadorId, ['custo' => '99999999.99'] + $dadosBaseValidos);
+$campeonatoCustoLimite = Campeonato::buscar($pdo, $idCustoLimite);
+Teste::igual('99999999.99', $campeonatoCustoLimite['custo'], 'C2: o maior custo que a coluna comporta (99999999.99) continua sendo aceito');
+
 $dadosSemDataEvento = $dadosBaseValidos;
 unset($dadosSemDataEvento['data_evento']);
 esperaRecusaCriar($pdo, $organizadorId, $dadosSemDataEvento, 'C2: chave data_evento ausente vira InvalidArgumentException, nao PDOException crua');

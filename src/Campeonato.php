@@ -14,6 +14,13 @@ final class Campeonato
      * presente que nao passe em is_numeric lanca InvalidArgumentException.
      * Sem esta checagem o servidor (que nao roda em modo estrito) gravaria
      * 0.00 em silencio no lugar de recusar um valor como "de graca".
+     *
+     * A coluna e DECIMAL(10,2): 10 digitos ao todo, 2 depois da virgula,
+     * entao o maior valor que cabe e 99999999.99. Negativo tambem e
+     * recusado - custo de evento nao existe abaixo de zero. As duas faixas
+     * sao o mesmo bug do servidor sem modo estrito, so que residual: sem
+     * elas, um valor como 99999999999 ou -50 nao lanca is_numeric, passa
+     * direto e o banco trunca ou aceita algo sem sentido em silencio.
      */
     private static function validarCusto(mixed $custo): ?string
     {
@@ -23,6 +30,13 @@ final class Campeonato
         }
         if (!is_numeric($custo)) {
             throw new InvalidArgumentException('Informe um custo valido, em numeros, ou deixe em branco.');
+        }
+        $numero = (float) $custo;
+        if ($numero < 0) {
+            throw new InvalidArgumentException('O custo nao pode ser negativo.');
+        }
+        if ($numero > 99999999.99) {
+            throw new InvalidArgumentException('O custo informado e maior do que o sistema aceita.');
         }
 
         return (string) $custo;

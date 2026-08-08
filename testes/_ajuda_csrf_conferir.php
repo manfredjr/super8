@@ -10,9 +10,10 @@
 
 require __DIR__ . '/../config/csrf.php';
 
-$modo = $argv[1] ?? 'errado';
+// csrf.php ja inicia a sessao sozinho ao ser incluido (M3, rodada de
+// revisao), entao nao precisa de um session_start() explicito aqui.
 
-session_start();
+$modo = $argv[1] ?? 'errado';
 
 $tokenReal = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
 $_SESSION['csrf'] = $tokenReal;

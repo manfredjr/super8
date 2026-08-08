@@ -7,24 +7,18 @@ require __DIR__ . '/../config/csrf.php';
 // ativa, sem exigir uma chamada explicita de session_start()/iniciarSessao()
 // - senao um ponto de entrada que esquecesse dessa chamada leria e
 // escreveria em $_SESSION num array comum, que nunca persiste entre
-// requisicoes, sem erro nenhum apontando o motivo. Esta checagem roda ANTES
-// do session_start() explicito logo abaixo, para provar que foi o require
-// de csrf.php quem iniciou a sessao, nao a linha seguinte.
+// requisicoes, sem erro nenhum apontando o motivo. Nenhuma chamada de
+// session_start() acontece neste arquivo: se esta asserticao passar, foi
+// o require de csrf.php quem iniciou a sessao sozinho.
 Teste::igual(
     PHP_SESSION_ACTIVE,
     session_status(),
     'M3: so incluir config/csrf.php ja inicia a sessao sozinho, sem exigir chamada explicita'
 );
 
-// A partir daqui a sessao ja esta ativa (pela linha acima). Este
-// session_start() e redundante de proposito: prova que um ponto de entrada
-// que ainda chame session_start() por conta propria (habito antigo, de antes
-// desta correcao) continua funcionando sem quebrar nada.
-session_start();
-
 echo "CSRF e escape\n";
 
-Teste::igual(PHP_SESSION_ACTIVE, session_status(), 'a sessao esta ativa de verdade, nao e um array solto');
+Teste::igual(PHP_SESSION_ACTIVE, session_status(), 'a sessao continua ativa mais adiante no script, nao e um array solto');
 Teste::verdade(session_id() !== '', 'a sessao tem um id de verdade, nao esta vazia');
 
 Teste::igual('&lt;script&gt;', e('<script>'), 'escapa sinal de menor e maior');

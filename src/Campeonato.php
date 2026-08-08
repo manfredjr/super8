@@ -237,6 +237,63 @@ final class Campeonato
     }
 
     /**
+     * Encerra um campeonato: essa e a UNICA transicao para o status
+     * 'encerrado', e Ranking::acumulado filtra exatamente por esse status,
+     * entao e essa chamada que faz um evento passar a contar no ranking
+     * acumulado entre eventos. Segue a mesma forma de guarda de transacao e
+     * a mesma ordem de trava das outras escritas da classe (campeonatos
+     * primeiro, sempre).
+     */
+    public static function encerrar(PDO $pdo, int $campeonatoId): void
+    {
+        $transacaoPropria = !$pdo->inTransaction();
+        if ($transacaoPropria) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $trava = $pdo->prepare('SELECT status FROM campeonatos WHERE id = ? FOR UPDATE');
+            $trava->execute([$campeonatoId]);
+            $status = $trava->fetchColumn();
+            if ($status === false) {
+                throw new RuntimeException('Campeonato nao encontrado.');
+            }
+
+            // Encerrar duas vezes nao e erro: se ja estiver encerrado, nao ha
+            // nada mais a fazer.
+            if ($status !== 'encerrado') {
+                // Contagem travada da mesma condicao larga de
+                // temPlacarLancado, so que invertida: aqui queremos o que
+                // AINDA falta (partida nem encerrada nem com nenhum dos dois
+                // games preenchidos), nao o que ja foi lancado.
+                $travaPendentes = $pdo->prepare(
+                    'SELECT COUNT(*) FROM partidas p
+                     JOIN rodadas r ON r.id = p.rodada_id
+                     WHERE r.campeonato_id = ?
+                       AND p.encerrada = 0 AND p.games_a IS NULL AND p.games_b IS NULL
+                     FOR UPDATE'
+                );
+                $travaPendentes->execute([$campeonatoId]);
+                if ((int) $travaPendentes->fetchColumn() > 0) {
+                    throw new RuntimeException('Ainda ha partidas sem placar lancado neste campeonato.');
+                }
+
+                $encerra = $pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?");
+                $encerra->execute([$campeonatoId]);
+            }
+
+            if ($transacaoPropria) {
+                $pdo->commit();
+            }
+        } catch (Throwable $erro) {
+            if ($transacaoPropria && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $erro;
+        }
+    }
+
+    /**
      * Sorteia as posicoes, grava a semente e gera as 7 rodadas com as 14 partidas.
      * Devolve a semente usada.
      *

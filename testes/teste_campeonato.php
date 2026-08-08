@@ -6,6 +6,7 @@ require __DIR__ . '/../src/Rodizio.php';
 require __DIR__ . '/../src/Sorteio.php';
 require __DIR__ . '/../src/Auth.php';
 require __DIR__ . '/../src/Campeonato.php';
+require __DIR__ . '/../src/Placar.php';
 
 /**
  * Mapa id da inscricao => posicao_sorteio, ordenado pela chave. Serve para
@@ -470,6 +471,55 @@ Teste::igual(
     count(Campeonato::listarInscricoes($pdo, $campeonatoId3)),
     'dois convidados sem conta (jogador_id null) coexistem no mesmo campeonato: NULL nunca colide em UNIQUE KEY'
 );
+
+// ============================================================================
+// C1 (Critico, rodada de revisao): Campeonato::encerrar e a UNICA transicao
+// para o status 'encerrado'. Ranking::acumulado filtra exatamente por esse
+// status - sem este metodo, nada no sistema fazia um evento contar no
+// ranking acumulado.
+// ============================================================================
+$campeonatoEncerrarId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Campeonato para encerrar', 'data_evento' => '2026-10-05',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+foreach (range(1, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoEncerrarId, "Encerrar {$numero}", null);
+}
+Campeonato::sortear($pdo, $campeonatoEncerrarId, 5555);
+
+$erroEncerrarPendente = null;
+try {
+    Campeonato::encerrar($pdo, $campeonatoEncerrarId);
+} catch (RuntimeException $excecao) {
+    $erroEncerrarPendente = $excecao->getMessage();
+}
+Teste::verdade($erroEncerrarPendente !== null, 'C1: encerrar recusa campeonato com partida pendente, com mensagem em portugues');
+
+$buscaPartidasEncerrar = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+$buscaPartidasEncerrar->execute([$campeonatoEncerrarId]);
+$idsPartidasEncerrar = $buscaPartidasEncerrar->fetchAll(PDO::FETCH_COLUMN);
+foreach ($idsPartidasEncerrar as $partidaId) {
+    Placar::gravar($pdo, $campeonatoEncerrarId, (int) $partidaId, 6, 3, $organizadorId);
+}
+
+Campeonato::encerrar($pdo, $campeonatoEncerrarId);
+$campeonatoEncerrado = Campeonato::buscar($pdo, $campeonatoEncerrarId);
+Teste::igual('encerrado', $campeonatoEncerrado['status'], 'C1: encerrar com as 14 partidas lancadas muda o status para encerrado');
+
+// Encerrar duas vezes nao e erro.
+Campeonato::encerrar($pdo, $campeonatoEncerrarId);
+$campeonatoEncerradoDeNovo = Campeonato::buscar($pdo, $campeonatoEncerrarId);
+Teste::igual('encerrado', $campeonatoEncerradoDeNovo['status'], 'C1: encerrar um campeonato ja encerrado nao lanca e mantem o status');
+
+$erroEncerrarInexistente = null;
+try {
+    Campeonato::encerrar($pdo, 999999999);
+} catch (RuntimeException $excecao) {
+    $erroEncerrarInexistente = $excecao->getMessage();
+}
+Teste::verdade($erroEncerrarInexistente !== null, 'C1: encerrar com id inexistente lanca RuntimeException');
 
 $pdo->rollBack();
 

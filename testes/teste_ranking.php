@@ -41,7 +41,13 @@ foreach ($partidas as $partidaId) {
     Placar::gravar($pdo, $campeonatoId, (int) $partidaId, 6, 3, $organizadorId);
 }
 
-$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoId]);
+// C1 (Critico, rodada de revisao): este e o unico evento deste arquivo que
+// chega ao estado encerrado usando so a API publica, sem UPDATE manual - a
+// prova de que Campeonato::encerrar e o que faz um evento passar a contar
+// no ranking acumulado. Os outros campeonatos deste arquivo continuam
+// forjando o status direto no banco, porque testam o FILTRO de
+// Ranking::acumulado, nao a transicao em si.
+Campeonato::encerrar($pdo, $campeonatoId);
 
 $linhas = Ranking::acumulado($pdo, null, null);
 $nossa = null;

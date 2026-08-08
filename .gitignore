@@ -2,3 +2,9 @@ config/config.php
 *.log
 .DS_Store
 Thumbs.db
+
+# Pastas de trabalho do projeto, nao versionadas.
+# _LIXEIRA guarda o que saiu de uso, porque neste projeto nada se apaga.
+# _PUBLICAR/enviar e o pacote de subida, montado a partir do codigo versionado.
+_LIXEIRA/
+_PUBLICAR/

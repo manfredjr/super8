@@ -4,22 +4,53 @@ Sistema de torneios de padel no formato Super 8. Oito jogadores, 7 rodadas, todo
 
 Etapa atual: motor do torneio e ranking acumulado, com login por e-mail e senha. O login com Google fica para a etapa 2, e a modelagem ja nasceu preparada para ele.
 
-## Rodar local
+## Os tres lugares
+
+O projeto trabalha em tres pastas com papeis diferentes, e vale entender isso antes de mexer em qualquer coisa.
+
+| Pasta | Papel |
+|---|---|
+| `C:\COWORK\CODE\SUPER8` | O projeto. Fonte de verdade, repositorio git, unico lugar onde se edita codigo |
+| `C:\xampp\htdocs\super8` | Copia de teste no XAMPP, para validar no navegador. Nao se edita nada aqui |
+| `C:\COWORK\CODE\SUPER8\_PUBLICAR\enviar` | Pacote que vai para o servidor publicado |
+
+O caminho e sempre nessa ordem. Editar direto na copia do XAMPP e a forma mais facil de perder trabalho, porque a proxima sincronizacao sobrescreve.
+
+## Preparar
 
 1. Ligar Apache e MySQL no painel do XAMPP.
 2. Criar o banco: `C:\xampp\mysql\bin\mysql.exe -u root < sql/schema.sql`
 3. Copiar `config/config.exemplo.php` para `config/config.php` e ajustar as credenciais.
-4. Abrir `http://localhost/super8/public/`.
 
-O arquivo `config/config.php` guarda as credenciais e fica fora do controle de versao de proposito. Somente o exemplo e versionado.
+O `config/config.php` guarda as credenciais e fica fora do controle de versao de proposito. Somente o exemplo e versionado.
 
 ## Rodar os testes
 
-`C:\xampp\php\php.exe testes/executar.php`
+```
+C:\xampp\php\php.exe testes\executar.php
+```
 
-Sao 13 arquivos de teste que rodam por linha de comando, sem navegador e sem servidor web. Alguns precisam do MySQL no ar, porque exercitam transacao e concorrencia de verdade, com dois processos disputando a mesma trava.
+Roda a partir do projeto, nao da copia do XAMPP. Sao 13 arquivos de teste que rodam por linha de comando, sem navegador e sem servidor web. Alguns precisam do MySQL no ar, porque exercitam transacao e concorrencia de verdade, com dois processos disputando a mesma trava.
 
 O runner julga cada arquivo pelo codigo de saida. Vale saber de uma armadilha do PHP que aparece varias vezes neste projeto: `exit('mensagem')` devolve codigo de saida zero, entao um teste que morre no meio passaria por aprovado. Os testes que podem alcancar um `exit` usam `register_shutdown_function` para forcar codigo diferente de zero.
+
+## Validar no navegador
+
+```
+powershell -ExecutionPolicy Bypass -File ferramentas\sincronizar-htdocs.ps1
+```
+
+Copia `config`, `src`, `views`, `public` e `sql` para `C:\xampp\htdocs\super8`, espelhando, entao arquivo apagado no projeto tambem sai da copia. Depois abra `http://localhost/super8/public/`.
+
+## Montar o pacote de publicacao
+
+```
+powershell -ExecutionPolicy Bypass -File ferramentas\montar-pacote.ps1
+```
+
+Roda a suite primeiro e aborta se algum teste falhar, porque descobrir isso depois do FTP custa muito mais. Monta `_PUBLICAR\enviar` e retira o `config.php` local do pacote, para que as credenciais de desenvolvimento nao subam nem sobrescrevam as de producao.
+
+No servidor faltam tres passos, que o script lembra ao terminar: criar o `config/config.php` a partir do exemplo com `COOKIE_SEGURO = true`, rodar o `sql/schema.sql` no banco de producao, e apontar o DocumentRoot para a pasta `public`.
 
 ## Como o codigo esta organizado
 
@@ -28,11 +59,11 @@ O runner julga cada arquivo pelo codigo de saida. Vale saber de uma armadilha do
 - `views/` guarda as telas, `public/` os pontos de entrada.
 - `sql/schema.sql` cria as seis tabelas.
 - `testes/` roda tudo. Arquivos comecando com `_ajuda_` sao auxiliares chamados por subprocesso, e nao testes; o nome e proposital, porque o runner so recolhe `teste_*.php`.
+- `ferramentas/` guarda os scripts de sincronizacao e empacotamento.
 
 ## Documentacao
 
 - `CLAUDE.md` traz as regras de trabalho no projeto.
-- `docs/especificacao-etapa1.md` traz o desenho: modelagem, decisoes de arquitetura com o motivo de cada uma, analise de seguranca, analise de LGPD e a lista dos limites aceitos nesta etapa.
-- `docs/plano-etapa1.md` traz o plano de implementacao tarefa por tarefa.
-
-As pastas `_LIXEIRA` e `_PUBLICAR\enviar`, citadas no `CLAUDE.md`, ficam na pasta do projeto e nao no repositorio.
+- `projeto-super8-padel.md` traz os requisitos originais do sistema.
+- `docs/superpowers/specs/` traz o desenho da etapa: modelagem, decisoes de arquitetura com o motivo de cada uma, analise de seguranca, analise de LGPD e a lista dos limites aceitos.
+- `docs/superpowers/plans/` traz o plano de implementacao tarefa por tarefa.

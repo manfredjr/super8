@@ -24,19 +24,37 @@ Nao apagar arquivo nenhum. Quando um arquivo precisar sair do lugar, mover para 
 
 Todo software desenvolvido aqui tem repositorio no GitHub associado. Cada alteracao vira um commit com mensagem que explica o que mudou. Commit e push so acontecem quando solicitado.
 
-### Publicacao
+### Os tres lugares, e o que e cada um
 
-Arquivo pronto para producao vai para `_PUBLICAR\enviar` na raiz do projeto. Essa pasta e o pacote de subida para o servidor. Nada de subir direto da pasta de desenvolvimento.
+Esta e a regra que organiza o projeto inteiro. Sao tres lugares com papeis diferentes, e confundi-los estraga o fluxo.
 
-### Ambiente de teste
+**1. O projeto:** `C:\COWORK\CODE\SUPER8`
 
-Aplicacao PHP + MySQL roda no XAMPP local. A pasta de teste deste projeto e:
+Aqui vivem os arquivos do projeto. E a fonte de verdade e o unico lugar onde se edita codigo. O repositorio git fica aqui, os documentos ficam aqui, os testes de linha de comando rodam daqui.
+
+**2. O teste local:** `C:\xampp\htdocs\super8`
+
+Copia da aplicacao rodando no XAMPP, para validar no navegador que ela funciona antes de mandar para o servidor publicado. Nao se edita nada aqui. Se algo precisa mudar, muda no projeto e sincroniza de novo. Recebe so o que a aplicacao precisa para rodar: `config`, `src`, `views`, `public` e `sql`. Nao recebe testes, nao recebe documentos, nao recebe git.
+
+**3. O pacote de publicacao:** `C:\COWORK\CODE\SUPER8\_PUBLICAR\enviar`
+
+Os arquivos que vao para o servidor publicado. Mesmo conteudo do teste local, montado a partir do codigo versionado. Nada sobe direto da pasta de desenvolvimento nem do XAMPP.
+
+O caminho e sempre projeto, depois teste local, depois pacote de publicacao. Cada projeto novo ganha uma pasta com o nome dele dentro de `htdocs`.
+
+Para sincronizar o teste local, ha um script no projeto:
 
 ```
-C:\xampp\htdocs\super8
+powershell -ExecutionPolicy Bypass -File ferramentas\sincronizar-htdocs.ps1
 ```
 
-Cada projeto ganha uma pasta com o nome dele dentro de `htdocs`.
+E para montar o pacote de publicacao:
+
+```
+powershell -ExecutionPolicy Bypass -File ferramentas\montar-pacote.ps1
+```
+
+Os dois copiam a partir do projeto, nunca de uma copia para outra, para nao propagar edicao feita no lugar errado.
 
 ### Antes de codar
 
@@ -50,13 +68,29 @@ O resultado dessa avaliacao entra em documento no projeto, nao so na conversa.
 ## Estrutura de pastas
 
 ```
-C:\COWORK\CODE\SUPER8\
-  CLAUDE.md                  este arquivo
-  projeto-super8-padel.md    requisitos do sistema
-  _LIXEIRA\                  destino de arquivos removidos
-  _PUBLICAR\enviar\          pacote pronto para producao
+C:\COWORK\CODE\SUPER8\                fonte de verdade, repositorio git
+  CLAUDE.md                           este arquivo
+  README.md                           como rodar e como esta organizado
+  projeto-super8-padel.md             requisitos originais do sistema
+  .gitignore  .gitattributes
+  config\                             conexao, sessao, csrf, acesso
+  src\                                as regras, sem uma linha de HTML
+  views\                              as telas
+  public\                             pontos de entrada
+  sql\                                schema do banco
+  testes\                             suite de linha de comando
+  ferramentas\                        scripts de sincronizacao e empacotamento
+  docs\
+    superpowers\specs\                especificacao da etapa
+    superpowers\plans\                plano de implementacao
+  _LIXEIRA\                           destino de arquivos removidos, fora do git
+  _PUBLICAR\enviar\                   pacote pronto para producao, fora do git
+
+C:\xampp\htdocs\super8\               copia de teste no navegador, sem git
 ```
 
 ## Stack
 
-PHP e MySQL, com Laravel previsto no documento de requisitos. Teste local no XAMPP, producao em VPS proprio com Let's Encrypt.
+PHP 8.2 e MariaDB, sem framework e sem Composer. O documento de requisitos original previa Laravel; a etapa 1 foi feita em PHP puro com PDO porque o sistema tem seis tabelas e oito telas, e o framework cobrava mais em preparo do que devolvia. A decisao esta registrada com o motivo em `docs/superpowers/specs`.
+
+Teste local no XAMPP, producao em VPS proprio com Let's Encrypt.

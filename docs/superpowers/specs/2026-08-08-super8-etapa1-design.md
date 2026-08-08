@@ -263,6 +263,16 @@ Depois desses, um teste de ponta a ponta no navegador: criar campeonato, inscrev
 
 ## 12. Ambiente
 
-Desenvolvimento e teste em `C:\xampp\htdocs\super8`, com banco `super8` no MySQL do XAMPP. Publicacao em `_PUBLICAR\enviar`. Repositorio no GitHub com um commit por alteracao.
+Tres lugares, com papeis distintos:
+
+| Pasta | Papel |
+|---|---|
+| `C:\COWORK\CODE\SUPER8` | O projeto. Fonte de verdade, repositorio git, e de onde a suite roda |
+| `C:\xampp\htdocs\super8` | Copia de teste no XAMPP, para validar no navegador. Nunca se edita |
+| `C:\COWORK\CODE\SUPER8\_PUBLICAR\enviar` | Pacote que vai para o servidor publicado |
+
+Banco `super8` no MySQL do XAMPP. Repositorio no GitHub com um commit por alteracao.
+
+Os dois destinos recebem copia a partir do projeto, nunca um do outro, por dois scripts em `ferramentas`. O de empacotamento roda a suite antes e aborta se algum teste falhar, porque um pacote com teste vermelho nao deveria existir e descobrir isso depois do FTP custa muito mais.
 
 Ponto pendente: o repositorio ainda nao existe. Precisa ser criado antes do primeiro commit.

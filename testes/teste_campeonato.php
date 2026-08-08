@@ -4,6 +4,7 @@ require __DIR__ . '/asserta.php';
 require __DIR__ . '/../config/db.php';
 require __DIR__ . '/../src/Rodizio.php';
 require __DIR__ . '/../src/Sorteio.php';
+require __DIR__ . '/../src/Validador.php';
 require __DIR__ . '/../src/Auth.php';
 require __DIR__ . '/../src/Campeonato.php';
 require __DIR__ . '/../src/Placar.php';
@@ -471,6 +472,57 @@ Teste::igual(
     count(Campeonato::listarInscricoes($pdo, $campeonatoId3)),
     'dois convidados sem conta (jogador_id null) coexistem no mesmo campeonato: NULL nunca colide em UNIQUE KEY'
 );
+
+// ============================================================================
+// C2 (Critico, rodada de revisao): criar/atualizar so faziam trim antes
+// desta correcao. Cada linha da tabela medida contra o banco real vira uma
+// asserticao de recusa: sem Validador, cada uma destas seis chamadas
+// gravava algo corrompido em silencio em vez de lancar.
+// ============================================================================
+function esperaRecusaCriar(PDO $pdo, int $organizadorId, array $dados, string $descricao): void
+{
+    $erro = null;
+    try {
+        Campeonato::criar($pdo, $organizadorId, $dados);
+    } catch (InvalidArgumentException $excecao) {
+        $erro = $excecao->getMessage();
+    }
+    Teste::verdade($erro !== null, $descricao);
+}
+
+$dadosBaseValidos = [
+    'nome'        => 'Validacao de entrada',
+    'data_evento' => '2026-10-01',
+    'local'       => 'Arena',
+    'custo'       => '',
+    'descricao'   => '',
+];
+
+esperaRecusaCriar($pdo, $organizadorId, ['nome' => str_repeat('a', 200)] + $dadosBaseValidos, 'C2: recusa nome com 200 caracteres (limite 160, antes gravava truncado)');
+esperaRecusaCriar($pdo, $organizadorId, ['data_evento' => ''] + $dadosBaseValidos, 'C2: recusa data_evento vazia (antes gravava 0000-00-00)');
+esperaRecusaCriar($pdo, $organizadorId, ['data_evento' => '31/12/2026'] + $dadosBaseValidos, 'C2: recusa data_evento em formato com barras (antes gravava 0000-00-00)');
+esperaRecusaCriar($pdo, $organizadorId, ['nome' => '   '] + $dadosBaseValidos, 'C2: recusa nome so com espacos (antes gravava string vazia)');
+esperaRecusaCriar($pdo, $organizadorId, ['custo' => 'de graca'] + $dadosBaseValidos, 'C2: recusa custo nao numerico (antes gravava 0.00)');
+
+$dadosSemDataEvento = $dadosBaseValidos;
+unset($dadosSemDataEvento['data_evento']);
+esperaRecusaCriar($pdo, $organizadorId, $dadosSemDataEvento, 'C2: chave data_evento ausente vira InvalidArgumentException, nao PDOException crua');
+
+// Uma data valida continua sendo aceita e gravada igual: a correcao nao pode
+// deixar de aceitar entrada correta.
+$idValidacaoOk = Campeonato::criar($pdo, $organizadorId, $dadosBaseValidos);
+$campeonatoValidacaoOk = Campeonato::buscar($pdo, $idValidacaoOk);
+Teste::igual('2026-10-01', $campeonatoValidacaoOk['data_evento'], 'C2: uma data valida continua sendo aceita e gravada igual');
+Teste::igual('Validacao de entrada', $campeonatoValidacaoOk['nome'], 'C2: nome valido continua gravado igual');
+
+// atualizar() passa pela mesma validacao que criar().
+$erroAtualizarCustoInvalido = null;
+try {
+    Campeonato::atualizar($pdo, $idValidacaoOk, ['custo' => 'de graca'] + $dadosBaseValidos);
+} catch (InvalidArgumentException $excecao) {
+    $erroAtualizarCustoInvalido = $excecao->getMessage();
+}
+Teste::verdade($erroAtualizarCustoInvalido !== null, 'C2: atualizar tambem recusa custo nao numerico');
 
 // ============================================================================
 // C1 (Critico, rodada de revisao): Campeonato::encerrar e a UNICA transicao

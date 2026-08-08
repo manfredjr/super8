@@ -4,6 +4,7 @@ require __DIR__ . '/asserta.php';
 require __DIR__ . '/../config/db.php';
 require __DIR__ . '/../src/Rodizio.php';
 require __DIR__ . '/../src/Sorteio.php';
+require __DIR__ . '/../src/Validador.php';
 require __DIR__ . '/../src/Auth.php';
 require __DIR__ . '/../src/Campeonato.php';
 

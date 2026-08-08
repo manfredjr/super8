@@ -2,21 +2,51 @@
 
 final class Campeonato
 {
+    /**
+     * custo vazio (string em branco ou nulo) vira nulo; qualquer valor
+     * presente que nao passe em is_numeric lanca InvalidArgumentException.
+     * Sem esta checagem o servidor (que nao roda em modo estrito) gravaria
+     * 0.00 em silencio no lugar de recusar um valor como "de graca".
+     */
+    private static function validarCusto(mixed $custo): ?string
+    {
+        $custo = is_string($custo) ? trim($custo) : $custo;
+        if ($custo === null || $custo === '') {
+            return null;
+        }
+        if (!is_numeric($custo)) {
+            throw new InvalidArgumentException('Informe um custo valido, em numeros, ou deixe em branco.');
+        }
+
+        return (string) $custo;
+    }
+
+    /** data_evento obrigatoria e validada pelo calendario real (Validador). */
+    private static function validarDataEvento(mixed $data): string
+    {
+        $data = trim((string) $data);
+        if (!Validador::dataValida($data)) {
+            throw new InvalidArgumentException('Informe uma data de evento valida, no formato AAAA-MM-DD.');
+        }
+
+        return $data;
+    }
+
     public static function criar(PDO $pdo, int $organizadorId, array $dados): int
     {
+        $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160);
+        $dataEvento = self::validarDataEvento($dados['data_evento'] ?? null);
+        $local = Validador::textoOpcional($dados['local'] ?? null, 160);
+        $custo = self::validarCusto($dados['custo'] ?? null);
+        $descricao = trim((string) ($dados['descricao'] ?? ''));
+        $descricao = $descricao === '' ? null : $descricao;
+
         // A coluna status ja tem DEFAULT 'rascunho' no schema, entao fica fora do INSERT.
         $comando = $pdo->prepare(
             'INSERT INTO campeonatos (organizador_id, nome, data_evento, local, custo, descricao, criado_em)
              VALUES (?, ?, ?, ?, ?, ?, NOW())'
         );
-        $comando->execute([
-            $organizadorId,
-            trim($dados['nome'] ?? ''),
-            $dados['data_evento'] ?? null,
-            $dados['local'] ?? null,
-            ($dados['custo'] ?? '') !== '' ? $dados['custo'] : null,
-            $dados['descricao'] ?? null,
-        ]);
+        $comando->execute([$organizadorId, $nome, $dataEvento, $local, $custo, $descricao]);
 
         return (int) $pdo->lastInsertId();
     }
@@ -40,25 +70,26 @@ final class Campeonato
 
     public static function atualizar(PDO $pdo, int $id, array $dados): void
     {
+        $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160);
+        $dataEvento = self::validarDataEvento($dados['data_evento'] ?? null);
+        $local = Validador::textoOpcional($dados['local'] ?? null, 160);
+        $custo = self::validarCusto($dados['custo'] ?? null);
+        $descricao = trim((string) ($dados['descricao'] ?? ''));
+        $descricao = $descricao === '' ? null : $descricao;
+
         $comando = $pdo->prepare(
             'UPDATE campeonatos SET nome = ?, data_evento = ?, local = ?, custo = ?, descricao = ? WHERE id = ?'
         );
-        $comando->execute([
-            trim($dados['nome'] ?? ''),
-            $dados['data_evento'] ?? null,
-            $dados['local'] ?? null,
-            ($dados['custo'] ?? '') !== '' ? $dados['custo'] : null,
-            $dados['descricao'] ?? null,
-            $id,
-        ]);
+        $comando->execute([$nome, $dataEvento, $local, $custo, $descricao, $id]);
     }
 
     public static function inscrever(PDO $pdo, int $campeonatoId, string $nomeExibicao, ?int $jogadorId): int
     {
-        $nomeExibicao = trim($nomeExibicao);
-        if ($nomeExibicao === '') {
-            throw new InvalidArgumentException('Informe o nome do competidor.');
-        }
+        // A coluna inscricoes.nome_exibicao e VARCHAR(120): sem o limite
+        // aqui, o servidor (que nao roda em modo estrito) cortaria o nome em
+        // silencio em vez de recusar, o mesmo bug ja corrigido em
+        // Auth::cadastrar para o nome de usuario.
+        $nomeExibicao = Validador::textoObrigatorio($nomeExibicao, 120);
 
         // Trava a linha do campeonato para serializar inscricoes concorrentes:
         // sem isso, duas conexoes podem contar 7 inscritos ao mesmo tempo,

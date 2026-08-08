@@ -23,11 +23,11 @@ final class Ranking
         $condicoes = ["c.status = 'encerrado'", 'i.jogador_id IS NOT NULL', 'p.encerrada = 1'];
         $valores = [];
 
-        if (self::dataValida($de)) {
+        if (Validador::dataValida($de)) {
             $condicoes[] = 'c.data_evento >= ?';
             $valores[] = $de;
         }
-        if (self::dataValida($ate)) {
+        if (Validador::dataValida($ate)) {
             $condicoes[] = 'c.data_evento <= ?';
             $valores[] = $ate;
         }
@@ -75,25 +75,5 @@ final class Ranking
         }
 
         return $linhas;
-    }
-
-    /**
-     * Uma data e valida para filtrar quando bate exatamente com o formato
-     * AAAA-MM-DD E o dia/mes formam uma data real (checkdate). As duas
-     * checagens sao necessarias: um valor como "2026-13-45" bate no formato
-     * mas nao existe no calendario, e o MariaDB NAO rejeita isso na
-     * comparacao "c.data_evento >= ?"/"<= ?" - ele trunca o valor com um
-     * aviso silencioso (1292, Truncated incorrect datetime value) e a
-     * condicao acaba nao filtrando nada, alargando a janela para tudo
-     * enquanto a tela mostra como se fosse um periodo. So garantir a FORMA
-     * (regex) nao fecha esse buraco; garantir a forma E o calendario fecha.
-     */
-    private static function dataValida(?string $data): bool
-    {
-        if ($data === null || preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $data, $partes) !== 1) {
-            return false;
-        }
-
-        return checkdate((int) $partes[2], (int) $partes[3], (int) $partes[1]);
     }
 }

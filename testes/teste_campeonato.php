@@ -306,6 +306,33 @@ Teste::igual(
     'nome de exibicao duplicado gera RuntimeException com mensagem em portugues'
 );
 
+// Importante 1 (rodada de revisao): um jogador_id que nao existe esbarra na
+// FOREIGN KEY fk_insc_jogador, uma SQLSTATE 23000 diferente da UNIQUE KEY de
+// nome. Isso tem que subir como PDOException cru, nunca como a mensagem de
+// nome duplicado (o nome usado aqui nem repete nenhum outro).
+$erroTipoErrado = null;
+$capturouPdoException = false;
+try {
+    Campeonato::inscrever($pdo, $campeonatoId2, 'Nome ainda livre', 999999999);
+} catch (PDOException $excecao) {
+    // PDOException extends RuntimeException no PHP, entao este catch tem
+    // que vir ANTES do catch (RuntimeException) abaixo: na ordem inversa, o
+    // catch mais generico capturaria a PDOException tambem, e o teste
+    // passaria mesmo se inscrever() tivesse disfarcado o erro real.
+    $capturouPdoException = true;
+} catch (RuntimeException $excecao) {
+    $erroTipoErrado = $excecao->getMessage();
+}
+Teste::verdade(
+    $capturouPdoException,
+    'jogador_id inexistente sobe como PDOException cru (fk_insc_jogador), nao foi engolido'
+);
+Teste::igual(
+    null,
+    $erroTipoErrado,
+    'jogador_id inexistente nao produz a mensagem de nome duplicado'
+);
+
 // I6: removerInscricao so apaga a inscricao se ela pertencer ao campeonato
 // informado. Passar o id de OUTRO campeonato nao pode remover nada: e
 // exatamente o caminho que permitiria a um organizador apagar a inscricao

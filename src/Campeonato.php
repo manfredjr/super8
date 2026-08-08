@@ -86,10 +86,17 @@ final class Campeonato
             try {
                 $comando->execute([$campeonatoId, $jogadorId, $nomeExibicao]);
             } catch (PDOException $excecao) {
-                // SQLSTATE 23000 aqui so pode ser a UNIQUE KEY uk_camp_nome
-                // (campeonato_id, nome_exibicao): outro competidor do mesmo
-                // campeonato ja usa esse nome de exibicao.
-                if ($excecao->getCode() === '23000') {
+                // Este INSERT pode falhar por tres motivos diferentes, e os
+                // tres caem na mesma classe SQLSTATE 23000: a UNIQUE KEY
+                // uk_camp_nome (nome duplicado), a FOREIGN KEY
+                // fk_insc_camp (campeonato_id inexistente) e a FOREIGN KEY
+                // fk_insc_jogador (jogador_id inexistente). So a primeira e
+                // "nome ja existe"; olhamos o codigo de erro do driver
+                // (1062 = entrada duplicada), nao a classe SQLSTATE, para
+                // nao confundir um jogador_id invalido com nome duplicado.
+                // Qualquer outro 23000 sobe cru, sem disfarcar o problema
+                // real.
+                if (($excecao->errorInfo[1] ?? null) === 1062) {
                     throw new RuntimeException('Ja existe um competidor com esse nome.');
                 }
                 throw $excecao;
@@ -130,10 +137,16 @@ final class Campeonato
         try {
             $comando->execute([$inscricaoId, $campeonatoId]);
         } catch (PDOException $excecao) {
-            // SQLSTATE 23000 aqui e a FOREIGN KEY de partidas.dupla_*: o
-            // sorteio ja rodou e existem partidas apontando para esta
-            // inscricao. Sem esta captura, quem chama recebe um PDOException
-            // cru, com nome de tabela e coluna do schema.
+            // Diferente do INSERT de inscrever(), aqui a classe SQLSTATE
+            // 23000 inteira pode virar a mesma mensagem sem risco de
+            // confundir o problema: um DELETE em inscricoes so tem UM jeito
+            // de esbarrar numa restricao de integridade, a FOREIGN KEY de
+            // partidas.dupla_* (o sorteio ja rodou e existem partidas
+            // apontando para esta inscricao). Nao ha UNIQUE KEY nem outra
+            // FOREIGN KEY que um DELETE possa violar aqui. Se um dia esta
+            // tabela ganhar outra restricao que um DELETE possa disparar,
+            // esta captura precisa ser estreitada do mesmo jeito que a de
+            // inscrever() foi.
             if ($excecao->getCode() === '23000') {
                 throw new RuntimeException('Nao e possivel remover um competidor depois do sorteio.');
             }
@@ -179,6 +192,20 @@ final class Campeonato
      * transacao de quem chamou continua aberta, para essa pessoa decidir se
      * da commit ou rollback nela. Se ninguem tem transacao aberta, este
      * metodo abre e fecha a sua propria transacao normalmente.
+     *
+     * Contrato de concorrencia: o servidor roda em REPEATABLE READ. A trava
+     * SELECT ... FOR UPDATE na linha do campeonato serializa este metodo
+     * contra qualquer OUTRO codigo que tambem trave a mesma linha antes de
+     * escrever, mas nao contra leituras comuns feitas antes dela: sob
+     * REPEATABLE READ, uma leitura comum (sem FOR UPDATE) que a transacao de
+     * quem chamou ja tenha feito antes desta chamada continua enxergando a
+     * foto de antes, mesmo depois da trava ser adquirida. Por isso as duas
+     * checagens de guarda abaixo usam leitura travada, e nao
+     * listarInscricoes()/temPlacarLancado(). Qualquer codigo futuro que
+     * grave um placar (partidas.games_a/games_b) PRECISA travar a mesma
+     * linha do campeonato antes de escrever: a trava so serializa contra
+     * quem trava a mesma linha, entao um placar gravado sem essa trava fica
+     * invisivel para a guarda deste metodo, mesmo com a leitura travada.
      */
     public static function sortear(PDO $pdo, int $campeonatoId, ?int $semente = null): int
     {
@@ -194,20 +221,49 @@ final class Campeonato
             // concorrentes: sem isso, duas conexoes podem ler "8 inscritos,
             // sem placar" ao mesmo tempo e uma delas redesenhar por cima de
             // um placar que a outra acabou de gravar, ou apagar um sorteio
-            // que a outra acabou de fazer.
-            $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
+            // que a outra acabou de fazer. Ja le o status atual junto (usado
+            // mais abaixo), para nao precisar de uma segunda ida ao banco
+            // so para isso.
+            $trava = $pdo->prepare('SELECT status FROM campeonatos WHERE id = ? FOR UPDATE');
             $trava->execute([$campeonatoId]);
+            $statusAtual = $trava->fetchColumn();
+            $statusAtual = $statusAtual === false ? null : $statusAtual;
 
-            $inscricoes = self::listarInscricoes($pdo, $campeonatoId);
-            if (count($inscricoes) !== 8) {
+            // Leitura travada (FOR UPDATE), nao listarInscricoes(): sob
+            // REPEATABLE READ, uma leitura comum reaproveitaria a foto de
+            // antes da trava acima, mesmo que outra conexao ja tenha
+            // inscrito ou removido alguem depois dessa foto. So uma leitura
+            // travada ve o commit mais recente. Os ids que saem daqui sao os
+            // mesmos que alimentam o embaralhamento logo abaixo, entao a
+            // contagem da guarda e o conjunto sorteado nunca podem divergir.
+            $travaInscricoes = $pdo->prepare('SELECT id FROM inscricoes WHERE campeonato_id = ? FOR UPDATE');
+            $travaInscricoes->execute([$campeonatoId]);
+            $idsInscritos = array_map(
+                static fn (array $linha): int => (int) $linha['id'],
+                $travaInscricoes->fetchAll()
+            );
+            if (count($idsInscritos) !== 8) {
                 throw new RuntimeException('O sorteio precisa de exatamente 8 competidores.');
             }
-            if (self::temPlacarLancado($pdo, $campeonatoId)) {
+
+            // Mesmo raciocinio para o placar: leitura travada com a mesma
+            // condicao alargada de temPlacarLancado (games preenchidos OU
+            // encerrada = 1), para nao redesenhar por cima de um placar que
+            // uma leitura comum, presa a uma foto antiga, nao enxergaria.
+            $travaPlacar = $pdo->prepare(
+                'SELECT COUNT(*) FROM partidas p
+                 JOIN rodadas r ON r.id = p.rodada_id
+                 WHERE r.campeonato_id = ?
+                   AND (p.encerrada = 1 OR p.games_a IS NOT NULL OR p.games_b IS NOT NULL)
+                 FOR UPDATE'
+            );
+            $travaPlacar->execute([$campeonatoId]);
+            if ((int) $travaPlacar->fetchColumn() > 0) {
                 throw new RuntimeException('Nao da para refazer o sorteio com placar ja lancado.');
             }
 
             $semente = $semente ?? Sorteio::gerarSemente();
-            $ids = array_map(static fn (array $inscricao): int => (int) $inscricao['id'], $inscricoes);
+            $ids = $idsInscritos;
             // A ordem dos ids antes do sorteio tem que depender so dos proprios ids,
             // nunca de um posicao_sorteio deixado por um sorteio anterior (isso e so
             // ordenacao de exibicao, de listarInscricoes). Sem este sort, refazer o
@@ -259,10 +315,10 @@ final class Campeonato
             }
 
             // So promove o status para 'sorteado' quando o campeonato estava
-            // em 'rascunho' ou ja em 'sorteado'. Um redesenho de auditoria
-            // sobre um campeonato 'em_andamento' ou 'encerrado' nao pode
-            // rebaixar o status silenciosamente.
-            $statusAtual = self::buscar($pdo, $campeonatoId)['status'] ?? null;
+            // em 'rascunho' ou ja em 'sorteado' (lido junto com a trava, no
+            // comeco desta funcao). Um redesenho de auditoria sobre um
+            // campeonato 'em_andamento' ou 'encerrado' nao pode rebaixar o
+            // status silenciosamente.
             if (in_array($statusAtual, ['rascunho', 'sorteado'], true)) {
                 $gravaSemente = $pdo->prepare(
                     "UPDATE campeonatos SET seed_sorteio = ?, status = 'sorteado' WHERE id = ?"
@@ -287,7 +343,12 @@ final class Campeonato
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-            } else {
+            } elseif ($pdo->inTransaction()) {
+                // Mesmo cuidado do ramo acima: numa conexao que ja perdeu a
+                // transacao sozinha, ROLLBACK TO SAVEPOINT lancaria por
+                // conta propria (o savepoint tambem some quando a transacao
+                // some) e esconderia o erro original atras de um erro sobre
+                // savepoint inexistente.
                 $pdo->exec('ROLLBACK TO SAVEPOINT sortear_campeonato');
             }
             throw $erro;
@@ -301,12 +362,14 @@ final class Campeonato
      *
      * Cada item do array devolvido e uma rodada, com as chaves numero
      * (int, 1 a 7) e partidas (array com as 2 partidas da rodada). Cada
-     * partida tem as chaves: id, quadra, games_a, games_b, encerrada, a1,
-     * a2, b1, b2 (nome_exibicao dos 4 competidores da partida) e
-     * dupla_a_j1, dupla_a_j2, dupla_b_j1, dupla_b_j2 (ids de inscricao
-     * desses mesmos 4 competidores). Nao ha chave "ids": os quatro ids de
-     * inscricao ja vem em dupla_a_j1/dupla_a_j2/dupla_b_j1/dupla_b_j2, que
-     * cobrem a mesma necessidade.
+     * partida tem as chaves: numero (o mesmo numero de rodada do item pai,
+     * repetido em cada partida porque a linha do SELECT carrega r.numero),
+     * id, quadra, games_a, games_b, encerrada, a1, a2, b1, b2
+     * (nome_exibicao dos 4 competidores da partida) e dupla_a_j1,
+     * dupla_a_j2, dupla_b_j1, dupla_b_j2 (ids de inscricao desses mesmos 4
+     * competidores). Nao ha chave "ids": os quatro ids de inscricao ja vem
+     * em dupla_a_j1/dupla_a_j2/dupla_b_j1/dupla_b_j2, que cobrem a mesma
+     * necessidade.
      */
     public static function chaveamento(PDO $pdo, int $campeonatoId): array
     {

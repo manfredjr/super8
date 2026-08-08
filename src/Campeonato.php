@@ -96,17 +96,30 @@ final class Campeonato
             try {
                 $comando->execute([$campeonatoId, $jogadorId, $nomeExibicao]);
             } catch (PDOException $excecao) {
-                // Este INSERT pode falhar por tres motivos diferentes, e os
-                // tres caem na mesma classe SQLSTATE 23000: a UNIQUE KEY
-                // uk_camp_nome (nome duplicado), a FOREIGN KEY
-                // fk_insc_camp (campeonato_id inexistente) e a FOREIGN KEY
-                // fk_insc_jogador (jogador_id inexistente). So a primeira e
-                // "nome ja existe"; olhamos o codigo de erro do driver
-                // (1062 = entrada duplicada), nao a classe SQLSTATE, para
-                // nao confundir um jogador_id invalido com nome duplicado.
-                // Qualquer outro 23000 sobe cru, sem disfarcar o problema
-                // real.
+                // Este INSERT pode falhar por quatro motivos diferentes, e
+                // todos caem na mesma classe SQLSTATE 23000: a UNIQUE KEY
+                // uk_camp_nome (nome duplicado), a UNIQUE KEY uk_camp_jogador
+                // (mesmo jogador_id inscrito duas vezes no mesmo campeonato -
+                // por exemplo um organizador cadastrando a mesma pessoa como
+                // "Joao" e depois "Joao S." sem perceber que e a mesma
+                // conta, o que antes desta UNIQUE KEY existir inflava o
+                // ranking em silencio), a FOREIGN KEY fk_insc_camp
+                // (campeonato_id inexistente) e a FOREIGN KEY fk_insc_jogador
+                // (jogador_id inexistente). As duas primeiras sao "entrada
+                // duplicada"; olhamos o codigo de erro do driver (1062), nao
+                // a classe SQLSTATE, para nao confundir um jogador_id
+                // invalido com qualquer uma das duas. Mas 1062 sozinho nao
+                // distingue QUAL das duas UNIQUE KEY foi violada - as duas
+                // usam o mesmo codigo - entao olhamos tambem o texto da
+                // mensagem do driver (errorInfo[2], nunca a mensagem
+                // traduzida do PDO), que o MariaDB sempre preenche com o
+                // nome da chave violada ("... for key 'uk_camp_jogador'" ou
+                // "... for key 'uk_camp_nome'"). Qualquer outro 23000 sobe
+                // cru, sem disfarcar o problema real.
                 if (($excecao->errorInfo[1] ?? null) === 1062) {
+                    if (str_contains($excecao->errorInfo[2] ?? '', 'uk_camp_jogador')) {
+                        throw new RuntimeException('Este jogador ja esta inscrito neste campeonato.');
+                    }
                     throw new RuntimeException('Ja existe um competidor com esse nome.');
                 }
                 throw $excecao;

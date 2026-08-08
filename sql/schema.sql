@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS inscricoes (
   CONSTRAINT fk_insc_camp FOREIGN KEY (campeonato_id) REFERENCES campeonatos(id),
   CONSTRAINT fk_insc_jogador FOREIGN KEY (jogador_id) REFERENCES users(id),
   UNIQUE KEY uk_camp_posicao (campeonato_id, posicao_sorteio),
-  UNIQUE KEY uk_camp_nome (campeonato_id, nome_exibicao)
+  UNIQUE KEY uk_camp_nome (campeonato_id, nome_exibicao),
+  UNIQUE KEY uk_camp_jogador (campeonato_id, jogador_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS rodadas (

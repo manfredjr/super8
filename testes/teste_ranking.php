@@ -180,6 +180,130 @@ Teste::verdade(
     'um campeonato que nao esta encerrado nao aparece no ranking, mesmo com todas as partidas ja com placar lancado'
 );
 
+// --- p.encerrada = 1: uma partida sem placar dentro de um evento ENCERRADO
+// nao pode contar como jogada, nem deixar SUM() ignorar o games nulo dela
+// em silencio -----------------------------------------------------------
+// Sem este filtro, os 4 jogadores da partida sem placar aparecem com 7
+// jogadas (o COUNT(*) da JOIN nao se importa se games_a/games_b sao nulos)
+// mas o SUM() pula o NULL sozinho - o total de games fica igual ao de
+// quem jogou todas as 7, mas o numero de partidas mentindo diz que houve
+// uma partida "de graca". E o defeito mais traicoeiro dos tres: continua
+// parecendo um ranking plausivel.
+function quadraDaRodada(int $numero, int $posicao): int
+{
+    foreach (Rodizio::RODADAS[$numero] as $indice => $partida) {
+        [$duplaA, $duplaB] = $partida;
+        if (in_array($posicao, $duplaA, true) || in_array($posicao, $duplaB, true)) {
+            return $indice;
+        }
+    }
+    throw new RuntimeException('posicao nao encontrada na rodada informada');
+}
+
+$jogadorParcialDentroId = Auth::cadastrar($pdo, 'Jogador Parcial Dentro', "jogpardentro{$sufixo}@exemplo.com", 'senhaforte123');
+$jogadorParcialForaId = Auth::cadastrar($pdo, 'Jogador Parcial Fora', "jogparfora{$sufixo}@exemplo.com", 'senhaforte123');
+
+$campeonatoParcialId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Parcial', 'data_evento' => '2026-04-10',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoParcialId, 'Jogador Parcial Dentro', $jogadorParcialDentroId);
+Campeonato::inscrever($pdo, $campeonatoParcialId, 'Jogador Parcial Fora', $jogadorParcialForaId);
+foreach (range(3, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoParcialId, "Convidado Parcial {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoParcialId, 5050);
+
+$buscaPosParcial = $pdo->prepare('SELECT jogador_id, posicao_sorteio FROM inscricoes WHERE campeonato_id = ?');
+$buscaPosParcial->execute([$campeonatoParcialId]);
+$posicaoPorJogadorParcial = [];
+foreach ($buscaPosParcial->fetchAll() as $linhaInsc) {
+    if ($linhaInsc['jogador_id'] !== null) {
+        $posicaoPorJogadorParcial[(int) $linhaInsc['jogador_id']] = (int) $linhaInsc['posicao_sorteio'];
+    }
+}
+$posDentro = $posicaoPorJogadorParcial[$jogadorParcialDentroId];
+$posFora = $posicaoPorJogadorParcial[$jogadorParcialForaId];
+
+// Procura uma rodada onde os dois caem em partidas (quadras) diferentes,
+// para poder deixar SO a partida do "dentro" sem placar sem tocar na do
+// "fora" de jeito nenhum.
+$rodadaEscolhida = null;
+foreach (range(1, 7) as $numero) {
+    if (quadraDaRodada($numero, $posDentro) !== quadraDaRodada($numero, $posFora)) {
+        $rodadaEscolhida = $numero;
+        break;
+    }
+}
+Teste::verdade($rodadaEscolhida !== null, 'existe uma rodada onde os dois jogadores parciais caem em partidas (quadras) diferentes');
+
+$quadraEscolhida = quadraDaRodada($rodadaEscolhida, $posDentro) + 1;
+$buscaPartidaAlvo = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
+     WHERE r.campeonato_id = ? AND r.numero = ? AND p.quadra = ?'
+);
+$buscaPartidaAlvo->execute([$campeonatoParcialId, $rodadaEscolhida, $quadraEscolhida]);
+$idPartidaSemPlacar = (int) $buscaPartidaAlvo->fetchColumn();
+
+$buscaTodasPartidasParcial = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+$buscaTodasPartidasParcial->execute([$campeonatoParcialId]);
+foreach ($buscaTodasPartidasParcial->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    if ((int) $partidaId === $idPartidaSemPlacar) {
+        continue; // fica de proposito sem placar (encerrada = 0)
+    }
+    Placar::gravar($pdo, $campeonatoParcialId, (int) $partidaId, 5, 2, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoParcialId]);
+
+// Conta a mao: "dentro" jogou 6 das 7 rodadas com placar (a rodada
+// escolhida ficou sem placar); "fora" jogou as 7 normalmente, porque a
+// partida sem placar nunca foi a dele.
+$ladoDentro = ladoPorRodada($posDentro);
+unset($ladoDentro[$rodadaEscolhida]);
+$contagemDentro = array_count_values($ladoDentro);
+$gamesEsperadoDentro = ($contagemDentro['A'] ?? 0) * 5 + ($contagemDentro['B'] ?? 0) * 2;
+
+$contagemFora = array_count_values(ladoPorRodada($posFora));
+$gamesEsperadoFora = ($contagemFora['A'] ?? 0) * 5 + ($contagemFora['B'] ?? 0) * 2;
+
+$linhasParcial = Ranking::acumulado($pdo, null, null);
+$linhaParcialDentro = null;
+$linhaParcialFora = null;
+foreach ($linhasParcial as $linha) {
+    if ((int) $linha['jogador_id'] === $jogadorParcialDentroId) {
+        $linhaParcialDentro = $linha;
+    }
+    if ((int) $linha['jogador_id'] === $jogadorParcialForaId) {
+        $linhaParcialFora = $linha;
+    }
+}
+
+Teste::verdade($linhaParcialDentro !== null, 'quem jogou a partida sem placar continua aparecendo no ranking (pelas outras 6 partidas)');
+Teste::igual(
+    6,
+    (int) $linhaParcialDentro['jogadas'],
+    'p.encerrada = 1 exclui a partida sem placar da CONTAGEM de jogadas de quem estava nela (6, nao 7)'
+);
+Teste::igual(
+    $gamesEsperadoDentro,
+    (int) $linhaParcialDentro['games'],
+    'p.encerrada = 1 exclui a partida sem placar da SOMA de games: sem o filtro, SUM() ignoraria o NULL em silencio e o total bateria igual mesmo contando 7 jogadas'
+);
+
+Teste::verdade($linhaParcialFora !== null, 'quem NAO jogou a partida sem placar aparece no ranking normalmente');
+Teste::igual(
+    7,
+    (int) $linhaParcialFora['jogadas'],
+    'quem nao estava na partida sem placar continua com as 7 jogadas normais, sem ser afetado pelo evento'
+);
+Teste::igual(
+    $gamesEsperadoFora,
+    (int) $linhaParcialFora['games'],
+    'o total de quem nao estava na partida sem placar bate com a conta a mao das 7 rodadas normais'
+);
+
 // --- Convidado sem conta nunca aparece ---------------------------------------
 $nomesConvidadosEvento1 = array_map(static fn (int $n): string => "Convidado {$n}", range(2, 8));
 foreach ($linhasSemFiltro as $linha) {
@@ -338,6 +462,185 @@ Teste::verdade(
 Teste::verdade(
     contemJogador($semODiaDeFim, $jogadorInicioId),
     'o torneio do inicio da janela continua entrando quando so o fim aperta'
+);
+
+// --- Data mal formada e tratada como sem filtro, nunca passada crua para o
+// MariaDB (que truncaria com aviso e alargaria a janela para tudo em vez de
+// filtrar nada e ainda por cima parecer que filtrou) ------------------------
+$semFiltroNenhum = Ranking::acumulado($pdo, null, null);
+Teste::igual(
+    $semFiltroNenhum,
+    Ranking::acumulado($pdo, 'nao-e-data', null),
+    'uma data mal formada em "de" e tratada como sem filtro, resultado identico a null'
+);
+Teste::igual(
+    $semFiltroNenhum,
+    Ranking::acumulado($pdo, null, '31/03/2026'),
+    'uma data em formato errado (com barras) em "ate" e tratada como sem filtro, resultado identico a null'
+);
+Teste::igual(
+    $semFiltroNenhum,
+    Ranking::acumulado($pdo, '', ''),
+    'string vazia nas duas datas continua tratada como sem filtro'
+);
+
+// --- ORDER BY: para um ranking, a ordem E o produto. Nada mais no projeto
+// re-ordena o array devolvido por Ranking::acumulado, entao um ORDER BY
+// quebrado (removido ou invertido) devolveria o pior jogador em primeiro
+// lugar e nenhum outro lugar do sistema notaria. -----------------------------
+// Tres jogadores com faixas de games BEM separadas (impossivel de se
+// confundir mesmo variando o lado da dupla sorteado), criados de proposito
+// na ordem CONTRARIA a ordem esperada no ranking (baixo primeiro, alto por
+// ultimo) - se o ORDER BY sumir e a consulta cair de volta para a ordem
+// natural (que tende a seguir a ordem de insercao/id), a checagem abaixo
+// pega isso na hora, porque a ordem natural ficaria CRESCENTE, nao
+// decrescente.
+$jogadorBaixoId = Auth::cadastrar($pdo, 'Jogador Ordem Baixo', "jogordbaixo{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoBaixoId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Ordem Baixo', 'data_evento' => '2026-07-01',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoBaixoId, 'Jogador Ordem Baixo', $jogadorBaixoId);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoBaixoId, "Convidado OB {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoBaixoId, 6001);
+$buscaPartidasBaixo = $pdo->prepare('SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?');
+$buscaPartidasBaixo->execute([$campeonatoBaixoId]);
+foreach ($buscaPartidasBaixo->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    // Faixa possivel para qualquer posicao: 0 a 7 (1 ponto por rodada, no
+    // maximo, se sempre do lado que soma 1).
+    Placar::gravar($pdo, $campeonatoBaixoId, (int) $partidaId, 1, 0, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoBaixoId]);
+
+$jogadorMedioId = Auth::cadastrar($pdo, 'Jogador Ordem Medio', "jogordmedio{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoMedioId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Ordem Medio', 'data_evento' => '2026-07-02',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoMedioId, 'Jogador Ordem Medio', $jogadorMedioId);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoMedioId, "Convidado OM {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoMedioId, 6002);
+$buscaPartidasMedio = $pdo->prepare('SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?');
+$buscaPartidasMedio->execute([$campeonatoMedioId]);
+foreach ($buscaPartidasMedio->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    // Faixa possivel: pior caso 7*15=105, melhor caso 7*20=140 - sempre
+    // maior que o pior caso de "baixo" (7) e sempre menor que o melhor caso
+    // de "alto" (veja abaixo).
+    Placar::gravar($pdo, $campeonatoMedioId, (int) $partidaId, 20, 15, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoMedioId]);
+
+$jogadorAltoId = Auth::cadastrar($pdo, 'Jogador Ordem Alto', "jogordalto{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoAltoId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Ordem Alto', 'data_evento' => '2026-07-03',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoAltoId, 'Jogador Ordem Alto', $jogadorAltoId);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoAltoId, "Convidado OA {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoAltoId, 6003);
+$buscaPartidasAlto = $pdo->prepare('SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?');
+$buscaPartidasAlto->execute([$campeonatoAltoId]);
+foreach ($buscaPartidasAlto->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    // Faixa possivel: pior caso 7*80=560, sempre maior que o melhor caso de
+    // "medio" (140).
+    Placar::gravar($pdo, $campeonatoAltoId, (int) $partidaId, 90, 80, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoAltoId]);
+
+// Dois jogadores com o MESMO total de games (empate genuino, nao
+// coincidencia): um placar de empate (mesmo numero nos dois lados) em
+// TODAS as 14 partidas de um campeonato da o mesmo total para os 8
+// competidores, nao importa o lado da dupla. Usa 36-36 (total 252 por
+// competidor) para nao coincidir com nenhuma outra faixa usada acima ou
+// com nenhum dos totais ja calculados neste arquivo (7, 20, 22 ou 42, 58,
+// 105-140, 560-630).
+$jogadorZuluId = Auth::cadastrar($pdo, 'Zulu Empate', "jogzulu{$sufixo}@exemplo.com", 'senhaforte123');
+$jogadorAlfaId = Auth::cadastrar($pdo, 'Alfa Empate', "jogalfa{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoEmpateId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Empate', 'data_evento' => '2026-07-04',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+// Cadastra Zulu ANTES de Alfa de proposito: se o desempate por nome sumisse
+// e a consulta caisse de volta para alguma ordem ligada a insercao/id dos
+// jogadores empatados, Zulu apareceria antes de Alfa - o contrario do que
+// "u.nome ASC" exige.
+Campeonato::inscrever($pdo, $campeonatoEmpateId, 'Zulu Empate', $jogadorZuluId);
+Campeonato::inscrever($pdo, $campeonatoEmpateId, 'Alfa Empate', $jogadorAlfaId);
+foreach (range(3, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoEmpateId, "Convidado OE {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoEmpateId, 6004);
+$buscaPartidasEmpate = $pdo->prepare('SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?');
+$buscaPartidasEmpate->execute([$campeonatoEmpateId]);
+foreach ($buscaPartidasEmpate->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    Placar::gravar($pdo, $campeonatoEmpateId, (int) $partidaId, 36, 36, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoEmpateId]);
+
+$linhasOrdenadas = Ranking::acumulado($pdo, null, null);
+
+Teste::verdade(count($linhasOrdenadas) >= 10, 'o ranking final tem todas as linhas esperadas para checar a ordem');
+
+$ordemNaoCrescente = true;
+for ($indice = 1; $indice < count($linhasOrdenadas); $indice++) {
+    if ((int) $linhasOrdenadas[$indice]['games'] > (int) $linhasOrdenadas[$indice - 1]['games']) {
+        $ordemNaoCrescente = false;
+        break;
+    }
+}
+Teste::verdade(
+    $ordemNaoCrescente,
+    'o ranking inteiro vem em ordem NAO crescente de games (ORDER BY games DESC): cada linha tem games menor ou igual a linha anterior'
+);
+
+$posicaoBaixo = null;
+$posicaoMedio = null;
+$posicaoAlto = null;
+foreach ($linhasOrdenadas as $indice => $linha) {
+    if ((int) $linha['jogador_id'] === $jogadorBaixoId) {
+        $posicaoBaixo = $indice;
+    }
+    if ((int) $linha['jogador_id'] === $jogadorMedioId) {
+        $posicaoMedio = $indice;
+    }
+    if ((int) $linha['jogador_id'] === $jogadorAltoId) {
+        $posicaoAlto = $indice;
+    }
+}
+Teste::verdade(
+    $posicaoAlto !== null && $posicaoMedio !== null && $posicaoBaixo !== null,
+    'os tres jogadores de faixas de games separadas aparecem no ranking'
+);
+Teste::verdade(
+    $posicaoAlto < $posicaoMedio && $posicaoMedio < $posicaoBaixo,
+    'o jogador de games alto vem antes do medio, que vem antes do baixo (ordem decrescente de verdade, nao so a ordem de cadastro)'
+);
+
+$posicaoZulu = null;
+$posicaoAlfa = null;
+foreach ($linhasOrdenadas as $indice => $linha) {
+    if ((int) $linha['jogador_id'] === $jogadorZuluId) {
+        $posicaoZulu = $indice;
+    }
+    if ((int) $linha['jogador_id'] === $jogadorAlfaId) {
+        $posicaoAlfa = $indice;
+    }
+}
+Teste::verdade($posicaoZulu !== null && $posicaoAlfa !== null, 'os dois jogadores empatados em games aparecem no ranking');
+Teste::igual(
+    (int) $linhasOrdenadas[$posicaoZulu]['games'],
+    (int) $linhasOrdenadas[$posicaoAlfa]['games'],
+    'checagem da premissa do cenario de empate: os dois tem exatamente o mesmo total de games'
+);
+Teste::verdade(
+    $posicaoAlfa < $posicaoZulu,
+    'entre dois jogadores empatados em games, o desempate e por nome em ordem alfabetica (Alfa antes de Zulu), mesmo Zulu tendo sido cadastrado primeiro'
 );
 
 $pdo->rollBack();

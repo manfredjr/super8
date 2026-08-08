@@ -381,6 +381,72 @@ Teste::igual(
     'redesenhar o sorteio nao rebaixa o status de em_andamento para sorteado'
 );
 
+// Rodada de revisao (Task 9, Importante 3): o mesmo jogador_id nao pode
+// ser inscrito duas vezes no mesmo campeonato, mesmo com nomes de exibicao
+// diferentes - e exatamente o cenario de um organizador cadastrando a
+// mesma pessoa como "Joao" e depois como "Joao S." sem perceber que e a
+// mesma conta, o que inflava silenciosamente o ranking acumulado (Task 9)
+// com um evento contando 14 partidas e o dobro dos games. Usa um
+// campeonato novo para nao interferir na contagem dos blocos acima.
+$campeonatoId3 = Campeonato::criar($pdo, $organizadorId, [
+    'nome'        => 'Terceiro campeonato de teste (jogador duplicado)',
+    'data_evento' => '2026-09-03',
+    'local'       => 'Arena C',
+    'custo'       => '',
+    'descricao'   => '',
+]);
+$jogadorDuploId = Auth::cadastrar(
+    $pdo,
+    'Jogador Duplo',
+    'jogadorduplo' . random_int(1000, 9999) . '@exemplo.com',
+    'senhaforte123'
+);
+Campeonato::inscrever($pdo, $campeonatoId3, 'Joao', $jogadorDuploId);
+
+$erroJogadorDuplicado = null;
+try {
+    Campeonato::inscrever($pdo, $campeonatoId3, 'Joao S.', $jogadorDuploId);
+} catch (RuntimeException $excecao) {
+    $erroJogadorDuplicado = $excecao->getMessage();
+}
+Teste::igual(
+    'Este jogador ja esta inscrito neste campeonato.',
+    $erroJogadorDuplicado,
+    'inscrever o mesmo jogador_id duas vezes no mesmo campeonato, com nomes diferentes, gera RuntimeException com mensagem propria (nao a de nome duplicado)'
+);
+Teste::igual(
+    1,
+    count(Campeonato::listarInscricoes($pdo, $campeonatoId3)),
+    'a tentativa recusada nao inseriu uma segunda inscricao para o mesmo jogador'
+);
+
+// Continua distinguindo da mensagem de nome duplicado (uk_camp_nome
+// continua funcionando do jeito de sempre, so com jogador_id nulo, senao
+// a UNIQUE KEY nova nem entraria em jogo para provar a diferenca).
+$erroNomeDuplicadoJ3 = null;
+try {
+    Campeonato::inscrever($pdo, $campeonatoId3, 'Joao', null);
+} catch (RuntimeException $excecao) {
+    $erroNomeDuplicadoJ3 = $excecao->getMessage();
+}
+Teste::igual(
+    'Ja existe um competidor com esse nome.',
+    $erroNomeDuplicadoJ3,
+    'nome duplicado continua com a mensagem de sempre, diferente da mensagem de jogador duplicado'
+);
+
+// NULL nao colide em UNIQUE KEY: dois convidados sem conta (jogador_id
+// null) continuam podendo coexistir no mesmo campeonato - a UNIQUE KEY
+// uk_camp_jogador nao pode impedir isso, senao um campeonato so poderia
+// ter UM convidado sem conta no total.
+Campeonato::inscrever($pdo, $campeonatoId3, 'Convidado Um', null);
+Campeonato::inscrever($pdo, $campeonatoId3, 'Convidado Dois', null);
+Teste::igual(
+    3,
+    count(Campeonato::listarInscricoes($pdo, $campeonatoId3)),
+    'dois convidados sem conta (jogador_id null) coexistem no mesmo campeonato: NULL nunca colide em UNIQUE KEY'
+);
+
 $pdo->rollBack();
 
 exit(Teste::resumo());

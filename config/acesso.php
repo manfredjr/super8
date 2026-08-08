@@ -28,7 +28,18 @@ function usuarioLogado(): ?array
 function exigirLogin(PDO $pdo): array
 {
     $sessao = $_SESSION['usuario'] ?? null;
-    if (!is_array($sessao) || !isset($sessao['id']) || !is_numeric($sessao['id'])) {
+    $idSessao = is_array($sessao) ? ($sessao['id'] ?? null) : null;
+    // ctype_digit trabalha sobre a forma em string, e nao is_numeric: is_numeric
+    // aceita "12.7", "1e3" e espaco em volta, formas que nao servem como id de
+    // linha. ctype_digit so aceita uma sequencia de digitos decimais, que e o
+    // que "um id inteiro utilizavel" quer dizer de verdade. Restrito a int/string
+    // antes de converter para nao arriscar "Array to string conversion" se
+    // alguem colocar um array ali.
+    if (
+        !is_array($sessao)
+        || !(is_int($idSessao) || is_string($idSessao))
+        || !ctype_digit((string) $idSessao)
+    ) {
         header('Location: login.php');
         exit;
     }
@@ -37,7 +48,7 @@ function exigirLogin(PDO $pdo): array
         'SELECT id, google_id, nome, email, foto_url, e_organizador, ativo, criado_em
          FROM users WHERE id = ?'
     );
-    $busca->execute([(int) $sessao['id']]);
+    $busca->execute([(int) $idSessao]);
     $usuario = $busca->fetch();
 
     if ($usuario === false || (int) $usuario['ativo'] !== 1) {
@@ -48,6 +59,12 @@ function exigirLogin(PDO $pdo): array
         header('Location: login.php');
         exit;
     }
+
+    // Escreve a linha fresca de volta na sessao: sem isso, usuarioLogado()
+    // (que so le a sessao, sem reconsultar o banco) continuaria servindo a
+    // copia velha depois que exigirLogin ja releu um usuario diferente, e as
+    // duas funcoes discordariam sobre quem esta logado.
+    $_SESSION['usuario'] = $usuario;
 
     return $usuario;
 }

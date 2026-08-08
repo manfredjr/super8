@@ -96,9 +96,12 @@ final class Auth
             return null;
         }
 
-        // Mantido como segunda camada alem da lista explicita de colunas acima:
-        // mesmo que a lista um dia inclua senha_hash por engano, ela nunca sai
-        // desta funcao.
+        // senha_hash precisa estar na lista de colunas la em cima porque
+        // password_verify() usa ele duas linhas acima. Este unset() e a UNICA
+        // coisa que tira o hash do array antes dele seguir para $_SESSION: nao
+        // e uma camada redundante, e o unico lugar que impede o vazamento. Se
+        // esta linha sumir, o teste que confere array_key_exists('senha_hash', ...)
+        // === false quebra, e a senha com hash e tudo passa a viver na sessao.
         unset($usuario['senha_hash']);
         return $usuario;
     }
@@ -155,7 +158,11 @@ final class Auth
                 $pdo->commit();
             }
         } catch (Throwable $excecao) {
-            if ($transacaoPropria) {
+            // inTransaction() evita chamar rollBack() numa conexao que ja
+            // perdeu a transacao sozinha (por exemplo, conexao caida no meio
+            // do caminho): rollBack() nessa hora lancaria por conta propria e
+            // esconderia o erro original atras de um erro sobre transacao.
+            if ($transacaoPropria && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             throw $excecao;

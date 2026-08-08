@@ -139,21 +139,45 @@ try {
     // receber nulo onde so se aceita string. Um manipulador de erro proprio
     // enxerga esse aviso mesmo com error_reporting do jeito que esta hoje
     // (que nao mostra E_DEPRECATED por padrao), entao a ausencia de avisos
-    // e a prova de que a checagem explicita continua no lugar.
+    // e um primeiro sinal de que a checagem explicita continua no lugar.
+    //
+    // Mas o aviso de depreciacao e so um efeito colateral do PHP 8: vira
+    // TypeError no PHP 9, e sumiria de vez se alguem trocar a guarda por
+    // "?? ''" em vez de checar null explicitamente. A propriedade que
+    // realmente importa e a da A4: sem a guarda, este caminho nunca chama
+    // password_verify() contra o HASH_FALSO, entao perde o tempo do Argon2id
+    // e responde quase instantaneo, revelando por timing que este e-mail nao
+    // tem senha utilizavel. Por isso comparamos a duracao contra a de uma
+    // rejeicao por senha errada numa conta de verdade (que tambem paga o
+    // custo cheio do Argon2id), em vez de um numero fixo de milissegundos,
+    // para nao ficar fragil em maquinas mais rapidas ou mais lentas.
     $emailSemSenha = 'semsenha' . uniqid() . '@exemplo.com';
     $pdo->prepare(
         'INSERT INTO users (nome, email, senha_hash, e_organizador, ativo, criado_em)
          VALUES (?, ?, NULL, 1, 1, NOW())'
     )->execute(['Sem Senha', $emailSemSenha]);
+
+    $inicioSenhaErrada = microtime(true);
+    Auth::autenticar($pdo, $email, 'outrasenhaerrada');
+    $duracaoSenhaErrada = microtime(true) - $inicioSenhaErrada;
+
     $avisosSenhaNula = [];
     set_error_handler(function (int $nivel, string $mensagem) use (&$avisosSenhaNula): bool {
         $avisosSenhaNula[] = $mensagem;
         return true;
     });
+    $inicioSenhaNula = microtime(true);
     $resultadoSenhaNula = Auth::autenticar($pdo, $emailSemSenha, 'qualquercoisa');
+    $duracaoSenhaNula = microtime(true) - $inicioSenhaNula;
     restore_error_handler();
+
     Teste::igual(null, $resultadoSenhaNula, 'usuario com senha_hash nulo nao consegue autenticar');
     Teste::igual([], $avisosSenhaNula, 'senha_hash nulo e barrado antes de chegar em password_verify, sem avisos do PHP por passar nulo onde se espera string');
+    Teste::verdade(
+        $duracaoSenhaNula >= $duracaoSenhaErrada * 0.3,
+        'a rejeicao por senha_hash nulo demora perto do mesmo tempo que uma rejeicao por senha errada de uma conta de verdade '
+            . '(nula: ' . round($duracaoSenhaNula * 1000, 3) . ' ms, senha errada: ' . round($duracaoSenhaErrada * 1000, 3) . ' ms)'
+    );
 
     // Usuario desativado nao pode autenticar, mesmo com a senha certa.
     $emailInativo = 'inativo' . uniqid() . '@exemplo.com';
@@ -219,15 +243,21 @@ try {
     Auth::limparFalhas($pdo, $email);
     Teste::igual(null, Auth::bloqueadoAte($pdo, $email), 'login certo limpa o bloqueio');
 } finally {
+    // As duas linhas de limpeza precisam estar no mesmo finally, e nesta
+    // ordem: o rollBack() da transacao principal roda primeiro e libera
+    // qualquer travamento que o INSERT que falhou (corrida do A7) tenha
+    // deixado sobre o indice unico. So depois disso a segunda conexao
+    // (fora da transacao principal, e por isso fora do alcance do
+    // rollBack) consegue apagar a propria linha sem travar esperando o
+    // mesmo lock. Estar dentro do finally, e nao depois dele, garante que
+    // essa limpeza roda mesmo se algo no meio do try lancar uma excecao
+    // inesperada; sem isso a linha corrida...@exemplo.com ficaria gravada
+    // para sempre, ja que foi escrita fora da transacao que o rollBack
+    // desfaz.
     $pdo->rollBack();
-}
-
-// A linha da corrida de cadastro foi gravada por uma conexao separada, fora
-// da transacao principal, entao o rollBack acima nao a desfaz. So limpamos
-// aqui, depois que a transacao principal ja terminou e liberou qualquer
-// travamento que o INSERT que falhou tenha deixado sobre aquele indice.
-if ($pdo2 !== null && $emailCorrida !== null) {
-    $pdo2->prepare('DELETE FROM users WHERE email = ?')->execute([$emailCorrida]);
+    if ($pdo2 !== null && $emailCorrida !== null) {
+        $pdo2->prepare('DELETE FROM users WHERE email = ?')->execute([$emailCorrida]);
+    }
 }
 
 exit(Teste::resumo());

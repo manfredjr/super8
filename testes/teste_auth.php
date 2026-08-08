@@ -2,6 +2,7 @@
 
 require __DIR__ . '/asserta.php';
 require __DIR__ . '/../config/db.php';
+require __DIR__ . '/../src/Validador.php';
 require __DIR__ . '/../src/Auth.php';
 
 echo "Auth\n";
@@ -309,6 +310,61 @@ try {
     $confereAceiteAtomicidade = $pdo->prepare('SELECT COUNT(*) AS c FROM aceites_termo WHERE user_id = ?');
     $confereAceiteAtomicidade->execute([$idAtomicidade]);
     Teste::igual(0, (int) $confereAceiteAtomicidade->fetch()['c'], 'I4: apos rollback, o aceite tambem nao sobra');
+
+    // ========================================================================
+    // Importante (segunda rodada de revisao): o catch de registrarAceite
+    // tratava SQLSTATE 23000 inteiro como sucesso silencioso, mas essa classe
+    // tambem cobre a FOREIGN KEY fk_aceite_user - um user_id inexistente era
+    // descartado sem excecao e sem gravar nada, exatamente o que o I4 existia
+    // para impedir (uma conta sem registro de base legal, e ninguem sabendo).
+    // O catch agora olha o codigo do driver (errorInfo[1]), do mesmo jeito
+    // que Campeonato::inscrever ja faz: 1062 (duplicidade) continua
+    // silencioso; qualquer outro codigo, inclusive 1452 (violacao de FK),
+    // sobe cru.
+    // ========================================================================
+    $erroAceiteUsuarioInexistente = null;
+    try {
+        Auth::registrarAceite($pdo, 987654321, '1.0', '127.0.0.1');
+    } catch (PDOException $excecao) {
+        $erroAceiteUsuarioInexistente = $excecao;
+    }
+    Teste::verdade($erroAceiteUsuarioInexistente !== null, 'registrarAceite com user_id inexistente lanca (nao e mais engolido pelo catch de 23000)');
+    Teste::igual(1452, $erroAceiteUsuarioInexistente?->errorInfo[1] ?? null, 'checagem do proprio teste: o erro e mesmo a violacao da FOREIGN KEY fk_aceite_user (1452), nao outra coisa');
+    $contaAceitesInexistente = $pdo->prepare('SELECT COUNT(*) AS c FROM aceites_termo WHERE user_id = ?');
+    $contaAceitesInexistente->execute([987654321]);
+    Teste::igual(0, (int) $contaAceitesInexistente->fetch()['c'], 'nenhuma linha foi gravada para o user_id inexistente');
+
+    // A duplicidade continua idempotente e silenciosa depois da correcao:
+    // usa o usuario de aceite ja cadastrado acima, que ja tem a versao '2.0'
+    // gravada.
+    $erroAceiteDuplicadoAindaSilencioso = null;
+    try {
+        Auth::registrarAceite($pdo, $idAceite, '2.0', '203.0.113.10');
+    } catch (Throwable $excecao) {
+        $erroAceiteDuplicadoAindaSilencioso = $excecao;
+    }
+    Teste::igual(null, $erroAceiteDuplicadoAindaSilencioso, 'aceitar a mesma versao de novo continua sem lancar nada, mesmo depois da correcao');
+    $contaAceitesDuplicado = $pdo->prepare('SELECT COUNT(*) AS c FROM aceites_termo WHERE user_id = ? AND versao = ?');
+    $contaAceitesDuplicado->execute([$idAceite, '2.0']);
+    Teste::igual(1, (int) $contaAceitesDuplicado->fetch()['c'], 'e continua sem duplicar a linha');
+
+    // ========================================================================
+    // Pequena 1 (segunda rodada de revisao): registrarAceite nao validava
+    // tamanho. aceites_termo.versao e VARCHAR(20) e ip e VARCHAR(45), e o
+    // servidor nao roda em modo estrito - sem a checagem, uma versao de 40
+    // caracteres gravaria truncada em 20, derrotando tanto a idempotencia da
+    // UNIQUE KEY quanto a comparacao de versaoAceita.
+    // ========================================================================
+    $erroVersaoLonga = null;
+    try {
+        Auth::registrarAceite($pdo, $idAceite, str_repeat('v', 21), '127.0.0.1');
+    } catch (InvalidArgumentException $excecao) {
+        $erroVersaoLonga = $excecao->getMessage();
+    }
+    Teste::verdade($erroVersaoLonga !== null, 'versao com mais de 20 caracteres e recusada, nao truncada em silencio');
+    $contaVersaoLonga = $pdo->prepare('SELECT COUNT(*) AS c FROM aceites_termo WHERE user_id = ? AND versao = ?');
+    $contaVersaoLonga->execute([$idAceite, str_repeat('v', 20)]);
+    Teste::igual(0, (int) $contaVersaoLonga->fetch()['c'], 'nenhuma versao truncada de 20 caracteres foi gravada para a versao recusada');
 } finally {
     // As duas linhas de limpeza precisam estar no mesmo finally, e nesta
     // ordem: o rollBack() da transacao principal roda primeiro e libera

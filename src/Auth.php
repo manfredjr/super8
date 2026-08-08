@@ -217,19 +217,25 @@ final class Auth
     /**
      * Grava o aceite do termo de uso. Aceitar a mesma versao duas vezes nao
      * e erro: a UNIQUE KEY uk_user_versao existe justamente para tornar isso
-     * idempotente, entao um 1062 aqui vira sucesso silencioso, do mesmo
-     * jeito que outros pontos do projeto tratam SQLSTATE 23000 esperado em
-     * vez de deixa-lo subir cru.
+     * idempotente. Mas SQLSTATE 23000 tambem cobre a FOREIGN KEY
+     * fk_aceite_user (user_id inexistente) - o mesmo motivo pelo qual
+     * Campeonato::inscrever olha o codigo de erro do driver (errorInfo[1]),
+     * nao a classe SQLSTATE inteira, para nao confundir as duas causas.
+     * So o 1062 (entrada duplicada) vira sucesso silencioso; qualquer outro
+     * 23000, inclusive violacao de FK, sobe cru.
      */
     public static function registrarAceite(PDO $pdo, int $userId, string $versao, ?string $ip): void
     {
+        $versao = Validador::textoObrigatorio($versao, 20);
+        $ip = Validador::textoOpcional($ip, 45);
+
         $comando = $pdo->prepare(
             'INSERT INTO aceites_termo (user_id, versao, aceito_em, ip) VALUES (?, ?, NOW(), ?)'
         );
         try {
             $comando->execute([$userId, $versao, $ip]);
         } catch (PDOException $excecao) {
-            if ($excecao->getCode() !== '23000') {
+            if (($excecao->errorInfo[1] ?? null) !== 1062) {
                 throw $excecao;
             }
         }

@@ -152,9 +152,18 @@ final class Auth
             // entao um unico comando com as duas atribuicoes teria resultado
             // dependente do motor. Separado, cada passo le um estado sem
             // ambiguidade, com o mesmo resultado nos dois bancos.
+            // bloqueado_ate comeca ja expirado (NOW()) em toda falha, nunca
+            // nulo: bloqueadoAte() so considera bloqueado o que for MAIOR
+            // que NOW(), entao um valor ja expirado nao bloqueia ninguem -
+            // mas deixa de ser nulo, e a limpeza (mais abaixo, que filtra
+            // por bloqueado_ate) passa a alcancar esta linha depois de um
+            // dia, em vez de crescer para sempre com uma linha por e-mail
+            // que nunca chegou a MAX_TENTATIVAS. A tentativa que realmente
+            // bloqueia (a instrucao seguinte) sobrescreve este valor com o
+            // horario real do bloqueio.
             $incrementa = $pdo->prepare(
-                'INSERT INTO tentativas_login (email, tentativas) VALUES (?, 1)
-                 ON DUPLICATE KEY UPDATE tentativas = tentativas + 1'
+                'INSERT INTO tentativas_login (email, tentativas, bloqueado_ate) VALUES (?, 1, NOW())
+                 ON DUPLICATE KEY UPDATE tentativas = tentativas + 1, bloqueado_ate = NOW()'
             );
             $incrementa->execute([$email]);
 

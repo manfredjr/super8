@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS tentativas_login (
   email         VARCHAR(160) PRIMARY KEY,
   tentativas    TINYINT UNSIGNED NOT NULL DEFAULT 0,
-  bloqueado_ate DATETIME NULL
+  bloqueado_ate DATETIME NULL,
+  INDEX idx_tent_bloqueado_ate (bloqueado_ate)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS aceites_termo (
@@ -84,5 +85,6 @@ CREATE TABLE IF NOT EXISTS partidas (
   CONSTRAINT fk_part_a2 FOREIGN KEY (dupla_a_j2) REFERENCES inscricoes(id),
   CONSTRAINT fk_part_b1 FOREIGN KEY (dupla_b_j1) REFERENCES inscricoes(id),
   CONSTRAINT fk_part_b2 FOREIGN KEY (dupla_b_j2) REFERENCES inscricoes(id),
+  CONSTRAINT fk_part_gravado_por FOREIGN KEY (gravado_por) REFERENCES users(id),
   UNIQUE KEY uk_rodada_quadra (rodada_id, quadra)
 ) ENGINE=InnoDB;

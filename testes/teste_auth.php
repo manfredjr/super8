@@ -213,6 +213,23 @@ try {
     }
     Teste::igual(null, Auth::bloqueadoAte($pdo, $email), 'quatro falhas ainda nao bloqueiam');
 
+    // Pendencia da revisao: bloqueado_ate nao pode ficar nulo abaixo do
+    // limite, senao a linha nunca casa com o filtro da limpeza diaria
+    // (nenhuma comparacao casa com nulo) e a tabela cresce sem limite por
+    // insercao anonima (a tela de login chama registrarFalha a cada falha,
+    // sem exigir conta). bloqueado_ate precisa estar preenchido, mas ja
+    // expirado, para nao bloquear ninguem e ainda assim ser alcancado pela
+    // limpeza.
+    $linhaFalhasAbaixoDoLimite = $pdo->prepare('SELECT bloqueado_ate FROM tentativas_login WHERE email = ?');
+    $linhaFalhasAbaixoDoLimite->execute([$email]);
+    $bloqueadoAteBruto = $linhaFalhasAbaixoDoLimite->fetch()['bloqueado_ate'];
+    Teste::verdade($bloqueadoAteBruto !== null, 'abaixo do limite, bloqueado_ate fica preenchido (nao nulo), para a limpeza diaria conseguir alcancar a linha depois de um dia');
+    // Compara contra o relogio do proprio MySQL, nao o do PHP (mesmo cuidado
+    // de mais abaixo, na curva de escalonamento): os dois podem rodar em
+    // fusos diferentes.
+    $agoraMysqlFalhasAbaixo = $pdo->query('SELECT NOW() AS agora')->fetch()['agora'];
+    Teste::verdade(strtotime($bloqueadoAteBruto) <= strtotime($agoraMysqlFalhasAbaixo), 'o bloqueado_ate gravado abaixo do limite ja esta expirado (no passado ou agora, pelo relogio do MySQL), entao nao bloqueia ninguem');
+
     // Le o relogio do proprio MySQL, e nao o do PHP: o container/servico do
     // MySQL pode rodar num fuso diferente do PHP (foi o caso aqui, 5 horas
     // de diferenca), e bloqueado_ate vem de NOW() do banco. Comparar contra

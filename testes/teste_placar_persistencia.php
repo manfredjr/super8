@@ -76,19 +76,31 @@ $linhaLida = $lida->fetch();
 Teste::igual(6, (int) $linhaLida['games_a'], 'a gravacao seguinte, dentro da mesma transacao do chamador, atualiza o placar');
 Teste::igual(4, (int) $linhaLida['games_b'], 'games_b tambem atualiza');
 
-// gravar() com um id de partida que nao existe nao pode lancar excecao (nao
-// ha nada para travar nem para atualizar, o UPDATE so afeta 0 linhas,
-// igual uma UPDATE comum contra um id inexistente).
-Placar::gravar($pdo, 999999999, 6, 3, $organizadorId);
-Teste::verdade(true, 'gravar com id de partida inexistente nao lanca excecao (UPDATE de 0 linhas)');
+// gravar() com um id de partida que nao existe tem que lancar RuntimeException,
+// nao silenciar num UPDATE de 0 linhas: a resolucao do campeonato agora usa
+// leitura travada (FOR UPDATE), e se ela nao acha nada, e porque a partida
+// de verdade nao existe (nao um retrato antigo escondendo uma linha real) -
+// deixar passar para o UPDATE final gravaria um placar numa partida que
+// nunca foi travada, ou simplesmente nao faria nada em silencio.
+$erroPartidaInexistente = null;
+try {
+    Placar::gravar($pdo, 999999999, 6, 3, $organizadorId);
+} catch (RuntimeException $excecao) {
+    $erroPartidaInexistente = $excecao->getMessage();
+}
+Teste::igual(
+    'A partida informada nao existe.',
+    $erroPartidaInexistente,
+    'gravar com id de partida inexistente lanca RuntimeException, em vez de um UPDATE silencioso de 0 linhas'
+);
 
 // --- Torneio completo: as 14 partidas, conferidas a mao -------------------
 // Os resultados abaixo foram somados partida a partida, na mao, para as
-// posicoes de sorteio 1 e 8 (ver task-8-report.md para a conta completa).
-// Os placares usam a POSICAO do sorteio (1 a 8), nao o id de inscricao, e
-// sao traduzidos para dupla_a_j1 etc. via porPosicao, na mesma ordem de
-// Rodizio::RODADAS (quadra 1 = duplaA/duplaB do primeiro item da rodada,
-// quadra 2 = do segundo).
+// posicoes de sorteio 1, 4, 6 e 8 (ver task-8-report.md para a conta
+// completa das 8 posicoes). Os placares usam a POSICAO do sorteio (1 a 8),
+// nao o id de inscricao, e sao traduzidos para dupla_a_j1 etc. via
+// porPosicao, na mesma ordem de Rodizio::RODADAS (quadra 1 = duplaA/duplaB
+// do primeiro item da rodada, quadra 2 = do segundo).
 $porPosicao = [];
 foreach (Campeonato::listarInscricoes($pdo, $campeonatoId) as $inscricao) {
     $porPosicao[(int) $inscricao['posicao_sorteio']] = (int) $inscricao['id'];
@@ -126,6 +138,8 @@ Teste::igual(8, count($classificacao), 'a classificacao tem os 8 competidores');
 
 $porInscricaoId = array_column($classificacao, null, 'inscricao_id');
 $idPosicao1 = $porPosicao[1];
+$idPosicao4 = $porPosicao[4];
+$idPosicao6 = $porPosicao[6];
 $idPosicao8 = $porPosicao[8];
 
 // Conferencia a mao (posicao 1): jogos contra as posicoes 8, 3(dupla), 6/7,
@@ -144,6 +158,44 @@ Teste::igual(14, $porInscricaoId[$idPosicao1]['saldo'], 'posicao 1: saldo 14');
 Teste::igual(5, $porInscricaoId[$idPosicao1]['vitorias'], 'posicao 1: 5 vitorias');
 Teste::igual(7, $porInscricaoId[$idPosicao1]['jogadas'], 'posicao 1: jogou as 7 partidas');
 
+// Conferencia a mao (posicao 4): ATENCAO, esta posicao empata em games com a
+// posicao 1 (41 cada), mas tem saldo melhor (18 contra 14) - e por isso
+// quem fica em PRIMEIRO lugar de verdade neste torneio e a posicao 4, nao a
+// posicao 1. Uma asserticao que so provasse "posicao 1 na frente da posicao
+// 8" (como a versao anterior deste teste fazia) nunca pegaria um bug de
+// saldo que trocasse a posicao 1 e a posicao 4 de lugar, ja que as duas
+// continuariam na frente da posicao 8 de qualquer jeito.
+// R1 quadra2 (dupla 3,6 vs 4,5) 5-5: feitos 5, sofridos 5, empate (posicao 4 esta na dupla B)
+// R2 quadra2 (dupla 4,7 vs 5,6) 6-1: feitos 6, sofridos 1, vitoria
+// R3 quadra1 (dupla 3,8 vs 2,4) 6-5: feitos 5, sofridos 6, derrota (posicao 4 esta na dupla B)
+// R4 quadra1 (dupla 4,8 vs 3,5) 6-2: feitos 6, sofridos 2, vitoria
+// R5 quadra1 (dupla 5,8 vs 4,6) 5-6: feitos 6, sofridos 5, vitoria (posicao 4 esta na dupla B)
+// R6 quadra2 (dupla 1,4 vs 2,3) 7-2: feitos 7, sofridos 2, vitoria
+// R7 quadra2 (dupla 2,5 vs 3,4) 2-6: feitos 6, sofridos 2, vitoria (posicao 4 esta na dupla B)
+// total games = 5+6+5+6+6+7+6 = 41; sofridos = 5+1+6+2+5+2+2 = 23; saldo = 18; vitorias = 5
+Teste::igual(41, $porInscricaoId[$idPosicao4]['games'], 'posicao 4: 41 games somados a mao, batendo com a classificacao');
+Teste::igual(23, $porInscricaoId[$idPosicao4]['sofridos'], 'posicao 4: 23 games sofridos somados a mao');
+Teste::igual(18, $porInscricaoId[$idPosicao4]['saldo'], 'posicao 4: saldo 18, melhor que o da posicao 1');
+Teste::igual(5, $porInscricaoId[$idPosicao4]['vitorias'], 'posicao 4: 5 vitorias');
+Teste::igual(7, $porInscricaoId[$idPosicao4]['jogadas'], 'posicao 4: jogou as 7 partidas');
+
+// Conferencia a mao (posicao 6): outro par que empata em games (36, com a
+// posicao 8) mas perde no saldo (1 contra 2), entao fica logo atras da
+// posicao 8.
+// R1 quadra2 (dupla 3,6 vs 4,5) 5-5: feitos 5, sofridos 5, empate (posicao 6 esta na dupla A)
+// R2 quadra2 (dupla 4,7 vs 5,6) 6-1: feitos 1, sofridos 6, derrota (posicao 6 esta na dupla B)
+// R3 quadra2 (dupla 1,5 vs 6,7) 6-6: feitos 6, sofridos 6, empate (posicao 6 esta na dupla B)
+// R4 quadra2 (dupla 2,6 vs 1,7) 6-4: feitos 6, sofridos 4, vitoria
+// R5 quadra1 (dupla 5,8 vs 4,6) 5-6: feitos 6, sofridos 5, vitoria (posicao 6 esta na dupla B)
+// R6 quadra1 (dupla 6,8 vs 5,7) 6-6: feitos 6, sofridos 6, empate
+// R7 quadra1 (dupla 7,8 vs 1,6) 3-6: feitos 6, sofridos 3, vitoria (posicao 6 esta na dupla B)
+// total games = 5+1+6+6+6+6+6 = 36; sofridos = 5+6+6+4+5+6+3 = 35; saldo = 1; vitorias = 3
+Teste::igual(36, $porInscricaoId[$idPosicao6]['games'], 'posicao 6: 36 games somados a mao, batendo com a classificacao');
+Teste::igual(35, $porInscricaoId[$idPosicao6]['sofridos'], 'posicao 6: 35 games sofridos somados a mao');
+Teste::igual(1, $porInscricaoId[$idPosicao6]['saldo'], 'posicao 6: saldo 1, pior que o da posicao 8');
+Teste::igual(3, $porInscricaoId[$idPosicao6]['vitorias'], 'posicao 6: 3 vitorias');
+Teste::igual(7, $porInscricaoId[$idPosicao6]['jogadas'], 'posicao 6: jogou as 7 partidas');
+
 // Conferencia a mao (posicao 8):
 // R1 quadra1 (dupla 1,8 vs 2,7) 6-3: feitos 6, sofridos 3, vitoria
 // R2 quadra1 (dupla 2,8 vs 1,3) 4-6: feitos 4, sofridos 6, derrota (posicao 8 esta na dupla A)
@@ -159,13 +211,41 @@ Teste::igual(2, $porInscricaoId[$idPosicao8]['saldo'], 'posicao 8: saldo 2');
 Teste::igual(3, $porInscricaoId[$idPosicao8]['vitorias'], 'posicao 8: 3 vitorias');
 Teste::igual(7, $porInscricaoId[$idPosicao8]['jogadas'], 'posicao 8: jogou as 7 partidas');
 
-// A posicao 1 (41 games) fica na frente da posicao 8 (36 games) na
-// classificacao final.
-$ids = array_column($classificacao, 'inscricao_id');
-Teste::verdade(
-    array_search($idPosicao1, $ids, true) < array_search($idPosicao8, $ids, true),
-    'posicao 1 (mais games) fica classificada na frente da posicao 8'
+// Ordem completa das 8 posicoes de sorteio, calculada a mao a partir dos
+// totais acima (games desc, saldo desc, vitorias desc - ninguem neste
+// torneio chega a precisar de confronto direto ou nome, porque cada grupo
+// de games empatados (41/41 e 36/36) ja se resolve no saldo):
+// 4 (41g, saldo 18) > 1 (41g, saldo 14) > 8 (36g, saldo 2) > 6 (36g, saldo 1)
+// > 7 (31g) > 3 (30g) > 2 (28g) > 5 (27g).
+$ordemEsperada = array_map(
+    static fn (int $posicao): int => $porPosicao[$posicao],
+    [4, 1, 8, 6, 7, 3, 2, 5]
 );
+$ids = array_column($classificacao, 'inscricao_id');
+Teste::igual(
+    $ordemEsperada,
+    $ids,
+    'a ordem completa das 8 posicoes bate com a conta a mao (inclusive posicao 4 na frente da posicao 1, por saldo)'
+);
+
+// Nenhum dos 8 competidores empata em tudo (games, saldo, vitorias e
+// confronto direto) com outro neste torneio - cada grupo de games iguais
+// (41/41 e 36/36) ja se separa no saldo, como a ordem acima mostra. Os
+// casos onde empatado tem que ficar true (pares e ciclos de confronto nao
+// transitivo) estao cobertos em teste_placar.php, na funcao pura; aqui a
+// intencao e confirmar que classificacao() de verdade devolve a chave
+// empatado (nunca deixa de gera-la) e que ela nao acende por engano quando
+// nao ha empate nenhum.
+foreach ([1, 2, 3, 4, 5, 6, 7, 8] as $posicao) {
+    Teste::verdade(
+        array_key_exists('empatado', $porInscricaoId[$porPosicao[$posicao]]),
+        "posicao {$posicao}: a linha da classificacao tem a chave empatado"
+    );
+    Teste::verdade(
+        !$porInscricaoId[$porPosicao[$posicao]]['empatado'],
+        "posicao {$posicao}: nao fica marcada como empatada (nenhum grupo de games/saldo/vitorias tem mais de um membro neste torneio)"
+    );
+}
 
 // Soma de conferencia: a soma de "games" de todas as 8 linhas tem que bater
 // com a soma de todos os games_a + games_b gravados nas 14 partidas vezes 2

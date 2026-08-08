@@ -17,10 +17,22 @@ final class Placar
      *
      * A partida so aponta para a rodada (partidas.rodada_id), nao para o
      * campeonato direto - por isso o campeonato precisa ser resolvido antes
-     * da trava, com um JOIN partidas -> rodadas. Se o id de partida nao
-     * existir, nao ha o que travar nem o que atualizar: o UPDATE final
-     * simplesmente nao afeta nenhuma linha, do mesmo jeito que aconteceria
-     * sem a trava.
+     * da trava, com um JOIN partidas -> rodadas.
+     *
+     * Essa resolucao usa uma leitura TRAVADA (FOR UPDATE), nao uma leitura
+     * comum: sob REPEATABLE READ, uma transacao de quem chama cujo retrato
+     * seja anterior a criacao desta partida (por exemplo, comecou antes do
+     * sorteio que a criou) NUNCA enxergaria essa linha com uma leitura
+     * comum, mesmo que ela ja exista de verdade no banco - o retrato fica
+     * congelado no inicio da transacao. Se a resolucao usasse leitura
+     * comum, o "if" que trava o campeonato simplesmente nao disparava
+     * nesse caso, e o UPDATE mais abaixo (que E uma leitura corrente,
+     * enxerga a linha independente do retrato) ainda gravava o placar -
+     * furando o contrato de Campeonato::sortear por completo, sem trava
+     * nenhuma. Se a partida nao existir de verdade (nem com leitura
+     * travada), a excecao abaixo interrompe antes de qualquer UPDATE, em
+     * vez de deixar um UPDATE que nao vai casar com nenhuma linha (ou pior,
+     * casar com uma linha que nunca foi travada).
      */
     public static function gravar(PDO $pdo, int $partidaId, int $gamesA, int $gamesB, int $usuarioId): void
     {
@@ -38,15 +50,17 @@ final class Placar
 
         try {
             $buscaCampeonato = $pdo->prepare(
-                'SELECT r.campeonato_id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE p.id = ?'
+                'SELECT r.campeonato_id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE p.id = ? FOR UPDATE'
             );
             $buscaCampeonato->execute([$partidaId]);
             $campeonatoId = $buscaCampeonato->fetchColumn();
 
-            if ($campeonatoId !== false) {
-                $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
-                $trava->execute([(int) $campeonatoId]);
+            if ($campeonatoId === false) {
+                throw new RuntimeException('A partida informada nao existe.');
             }
+
+            $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
+            $trava->execute([(int) $campeonatoId]);
 
             $comando = $pdo->prepare(
                 'UPDATE partidas SET games_a = ?, games_b = ?, encerrada = 1, gravado_por = ?, gravado_em = NOW()
@@ -67,7 +81,14 @@ final class Placar
 
     public static function classificacao(PDO $pdo, int $campeonatoId): array
     {
-        $buscaInscricoes = $pdo->prepare('SELECT id, nome_exibicao FROM inscricoes WHERE campeonato_id = ?');
+        // ORDER BY id: garante que a ordem de entrada em classificarLinhas seja
+        // deterministica entre chamadas. Sem isso, duas execucoes de
+        // classificacao() no mesmo campeonato podiam devolver as linhas de
+        // classificarLinhas construidas em ordens diferentes (a ordem de um
+        // SELECT sem ORDER BY nao e garantida pelo MariaDB), o que por sua vez
+        // podia fazer um grupo empatado por games/saldo/vitorias/confronto sair
+        // em posicoes de podio diferentes de uma chamada para a outra.
+        $buscaInscricoes = $pdo->prepare('SELECT id, nome_exibicao FROM inscricoes WHERE campeonato_id = ? ORDER BY id');
         $buscaInscricoes->execute([$campeonatoId]);
 
         $buscaPartidas = $pdo->prepare(
@@ -167,20 +188,68 @@ final class Placar
             return strcmp($um['nome'], $outro['nome']);
         });
 
-        // Marca quem empatou em tudo, inclusive no confronto direto.
-        $total = count($linhas);
-        for ($i = 0; $i < $total; $i++) {
-            for ($j = $i + 1; $j < $total; $j++) {
-                $mesmaConta = $linhas[$i]['games'] === $linhas[$j]['games']
-                    && $linhas[$i]['saldo'] === $linhas[$j]['saldo']
-                    && $linhas[$i]['vitorias'] === $linhas[$j]['vitorias'];
+        // Marca quem fica empatado: agrupa por games/saldo/vitorias, e dentro
+        // de cada grupo tenta usar o confronto direto para desempatar de
+        // verdade.
+        //
+        // Uma comparacao par a par (so olhar se CADA DUPLA tem o mesmo
+        // confronto) nao basta: ela so pega o caso de um par com confronto
+        // igual, mas nao pega um CICLO de tres ou mais - A bate B, B bate C
+        // e C bate A - onde toda comparacao de par e par e "diferente" (cada
+        // par tem um vencedor de confronto), mas o grupo inteiro continua
+        // sem uma ordem real, porque a comparacao nao e transitiva. Nesse
+        // caso a comparacao par a par acima marcava empatado=false para os
+        // tres, e o usort() (que so enxerga comparacoes de dois em dois, sem
+        // saber que esta dentro de um ciclo) produzia uma ordem que dependia
+        // so da sequencia interna do algoritmo de ordenacao - podendo mudar
+        // so por causa da ordem de entrada dos jogadores, sem nenhuma
+        // mudanca no placar.
+        //
+        // Por isso o desempate por confronto so vale se ele ORDENA O GRUPO
+        // INTEIRO de forma estrita: cada membro do grupo bate um numero
+        // DIFERENTE de outros membros do MESMO grupo (0, 1, 2, ...). Se dois
+        // membros baterem o mesmo tanto de gente dentro do grupo -- inclusive
+        // o caso de dois jogadores empatados entre si (cada um bate 0 dos
+        // outros do grupo, ou os dois se enfrentaram e empataram no
+        // confronto), inclusive um ciclo (todos batem exatamente 1 cada) --
+        // o grupo inteiro fica marcado como empatado, e a ordem que sobra do
+        // usort() e so um jeito de mostrar as linhas, nunca uma classificacao
+        // real entre elas.
+        $grupos = [];
+        foreach ($linhas as $indice => $linha) {
+            $chave = $linha['games'] . '|' . $linha['saldo'] . '|' . $linha['vitorias'];
+            $grupos[$chave][] = $indice;
+        }
 
-                $doUm = $confronto[$linhas[$i]['inscricao_id']][$linhas[$j]['inscricao_id']] ?? 0;
-                $doOutro = $confronto[$linhas[$j]['inscricao_id']][$linhas[$i]['inscricao_id']] ?? 0;
+        foreach ($grupos as $indicesDoGrupo) {
+            if (count($indicesDoGrupo) < 2) {
+                continue;
+            }
 
-                if ($mesmaConta && $doUm === $doOutro) {
-                    $linhas[$i]['empatado'] = true;
-                    $linhas[$j]['empatado'] = true;
+            // Quantos outros membros do MESMO grupo cada jogador bate no
+            // confronto direto entre eles.
+            $contagemDeVitoriasNoGrupo = [];
+            foreach ($indicesDoGrupo as $indice) {
+                $id = $linhas[$indice]['inscricao_id'];
+                $contagem = 0;
+                foreach ($indicesDoGrupo as $outroIndice) {
+                    if ($outroIndice === $indice) {
+                        continue;
+                    }
+                    $outroId = $linhas[$outroIndice]['inscricao_id'];
+                    $doUm = $confronto[$id][$outroId] ?? 0;
+                    $doOutro = $confronto[$outroId][$id] ?? 0;
+                    if ($doUm > $doOutro) {
+                        $contagem++;
+                    }
+                }
+                $contagemDeVitoriasNoGrupo[$indice] = $contagem;
+            }
+
+            $ordenaOGrupoInteiro = count(array_unique($contagemDeVitoriasNoGrupo)) === count($contagemDeVitoriasNoGrupo);
+            if (!$ordenaOGrupoInteiro) {
+                foreach ($indicesDoGrupo as $indice) {
+                    $linhas[$indice]['empatado'] = true;
                 }
             }
         }

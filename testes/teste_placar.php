@@ -259,7 +259,7 @@ Teste::verdade(!$porId[303]['empatado'], '303 nao fica marcado como empatado: a 
 // 301 e 303, entao uma implementacao que comparasse vitorias antes do saldo
 // passaria por ele do mesmo jeito (301 e 303 tem saldo igual, a ordem entre
 // os dois criterios nao importa quando um deles ja empata). Aqui os dois
-// discordam: 501 tem saldo bem melhor mas so 1 vitoria (um jogo só, goleada);
+// discordam: 501 tem saldo bem melhor mas so 1 vitoria (um jogo so, goleada);
 // 505 tem saldo pior mas 2 vitorias (dois jogos apertados). Games empatados
 // em 6 para os tres. Pela ordem certa (saldo antes de vitorias), 501 (e seu
 // parceiro 502, que jogou so essa partida e por isso fica com os mesmos
@@ -307,5 +307,251 @@ Teste::verdade(
     array_search(502, $ids, true) < array_search(505, $ids, true),
     'o parceiro 502 (mesmo saldo de 501, so jogou aquela partida) tambem fica na frente de 505'
 );
+
+// Precedencia vitorias > confronto direto, de verdade: os testes acima de
+// confronto direto (o do brief e os de cima) sempre tem vitorias JA
+// empatadas entre os dois jogadores comparados, entao uma implementacao que
+// comparasse confronto direto antes de vitorias passaria por eles do mesmo
+// jeito. Aqui os dois discordam de proposito: 701 vence o confronto direto
+// contra 705 por goleada (10-2), mas 705 tem mais vitorias no total da
+// carreira (2 contra 1). Games e saldo empatados em 12/0 para os dois. Pela
+// ordem certa (vitorias antes de confronto), 705 fica na frente de 701,
+// mesmo perdendo o confronto direto entre eles.
+$vinteUm = [];
+foreach ([701, 705, 702, 703, 706, 707, 708, 709, 710, 711, 712, 713, 714] as $id) {
+    $vinteUm[] = ['id' => $id, 'nome_exibicao' => "Jogador {$id}"];
+}
+$porConfrontoAntesDeVitorias = [
+    // Confronto direto entre 701 e 705: 701 goleia.
+    [
+        'dupla_a_j1' => 701, 'dupla_a_j2' => 702,
+        'dupla_b_j1' => 705, 'dupla_b_j2' => 706,
+        'games_a' => 10, 'games_b' => 2, 'encerrada' => 1,
+    ],
+    // 701 perde a segunda partida (parceiro e adversarios diferentes, nunca
+    // encontra 705 de novo): fecha games=12, saldo=0, so 1 vitoria no total.
+    [
+        'dupla_a_j1' => 701, 'dupla_a_j2' => 703,
+        'dupla_b_j1' => 709, 'dupla_b_j2' => 710,
+        'games_a' => 2, 'games_b' => 10, 'encerrada' => 1,
+    ],
+    // 705 vence duas partidas apertadas contra adversarios diferentes
+    // (nunca contra 701 de novo): fecha games=12, saldo=0, 2 vitorias no
+    // total - mais que 701, apesar de ter perdido o confronto direto.
+    [
+        'dupla_a_j1' => 705, 'dupla_a_j2' => 707,
+        'dupla_b_j1' => 711, 'dupla_b_j2' => 712,
+        'games_a' => 5, 'games_b' => 1, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 705, 'dupla_a_j2' => 708,
+        'dupla_b_j1' => 713, 'dupla_b_j2' => 714,
+        'games_a' => 5, 'games_b' => 1, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($vinteUm, $porConfrontoAntesDeVitorias);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+Teste::igual(12, $porId[701]['games'], '701 soma 12 games');
+Teste::igual(0, $porId[701]['saldo'], '701 fica com saldo zero');
+Teste::igual(1, $porId[701]['vitorias'], '701 tem so 1 vitoria no total');
+Teste::igual(12, $porId[705]['games'], '705 tambem soma 12 games, empatado com 701');
+Teste::igual(0, $porId[705]['saldo'], '705 tambem fica com saldo zero');
+Teste::igual(2, $porId[705]['vitorias'], '705 tem 2 vitorias no total, mais que 701');
+
+$ids = array_column($linhas, 'inscricao_id');
+Teste::verdade(
+    array_search(705, $ids, true) < array_search(701, $ids, true),
+    'com games e saldo empatados, quem tem mais vitorias no total (705) fica na frente de quem venceu o confronto direto mas tem menos vitorias (701): vitorias decide antes do confronto direto'
+);
+
+// Precedencia confronto direto > nome, de verdade: o teste de confronto
+// direto do brief usa os ids 101 e 103, nomeados "Jogador 01" e "Jogador
+// 03" - e 101 (que vence o confronto) tambem vem primeiro por strcmp, entao
+// aquele teste nao prova que o confronto decide ANTES do nome: uma
+// implementacao que comparasse nome antes de confronto direto passaria por
+// ele do mesmo jeito, so por coincidencia alfabetica. Aqui os nomes vao na
+// direcao CONTRARIA ao confronto de proposito: "Jogador Zulu" vence o
+// confronto direto contra "Jogador Alfa", mas "Alfa" vem antes de "Zulu"
+// por ordem alfabetica. Games, saldo e vitorias empatados em 9/0/1 para os
+// dois. Pela ordem certa (confronto antes de nome), Zulu fica na frente de
+// Alfa, apesar do nome.
+$vinteQuatro = [];
+foreach ([900, 901, 902, 903, 904, 906, 907, 908, 909, 910] as $id) {
+    $vinteQuatro[] = ['id' => $id, 'nome_exibicao' => "Jogador {$id}"];
+}
+// Sobrescreve so os nomes de 900 e 901, que sao os unicos que este teste
+// examina.
+foreach ($vinteQuatro as &$linhaInscricao) {
+    if ($linhaInscricao['id'] === 900) {
+        $linhaInscricao['nome_exibicao'] = 'Jogador Zulu';
+    } elseif ($linhaInscricao['id'] === 901) {
+        $linhaInscricao['nome_exibicao'] = 'Jogador Alfa';
+    }
+}
+unset($linhaInscricao);
+
+Teste::verdade(strcmp('Jogador Alfa', 'Jogador Zulu') < 0, 'checagem do proprio teste: "Alfa" vem antes de "Zulu" por ordem alfabetica');
+
+$porNomeContraConfronto = [
+    // Confronto direto entre 900 (Zulu) e 901 (Alfa): Zulu vence.
+    [
+        'dupla_a_j1' => 900, 'dupla_a_j2' => 902,
+        'dupla_b_j1' => 901, 'dupla_b_j2' => 903,
+        'games_a' => 6, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    // 900 (Zulu) perde a segunda partida, contra adversarios diferentes:
+    // fecha games=9, saldo=0, 1 vitoria.
+    [
+        'dupla_a_j1' => 900, 'dupla_a_j2' => 904,
+        'dupla_b_j1' => 906, 'dupla_b_j2' => 907,
+        'games_a' => 3, 'games_b' => 6, 'encerrada' => 1,
+    ],
+    // 901 (Alfa) vence a segunda partida, contra adversarios diferentes:
+    // fecha games=9, saldo=0, 1 vitoria - empatado com 900 em tudo, menos
+    // no confronto direto.
+    [
+        'dupla_a_j1' => 901, 'dupla_a_j2' => 908,
+        'dupla_b_j1' => 909, 'dupla_b_j2' => 910,
+        'games_a' => 6, 'games_b' => 3, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($vinteQuatro, $porNomeContraConfronto);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+Teste::igual(9, $porId[900]['games'], '900 (Zulu) soma 9 games');
+Teste::igual(0, $porId[900]['saldo'], '900 (Zulu) fica com saldo zero');
+Teste::igual(1, $porId[900]['vitorias'], '900 (Zulu) tem 1 vitoria');
+Teste::igual(9, $porId[901]['games'], '901 (Alfa) tambem soma 9 games');
+Teste::igual(0, $porId[901]['saldo'], '901 (Alfa) tambem fica com saldo zero');
+Teste::igual(1, $porId[901]['vitorias'], '901 (Alfa) tambem tem 1 vitoria');
+
+$ids = array_column($linhas, 'inscricao_id');
+Teste::verdade(
+    array_search(900, $ids, true) < array_search(901, $ids, true),
+    'com games, saldo e vitorias empatados, quem vence o confronto direto (900, "Zulu") fica na frente de quem perde (901, "Alfa"), mesmo com o nome em desvantagem alfabetica: confronto decide antes do nome'
+);
+
+// --- empatado com 3 ou mais jogadores: ciclo nao-transitivo ---------------
+// A marca de empate so olhando pares (equal-pair) nao pega um CICLO: A bate
+// B, B bate C e C bate A no confronto direto, com os tres empatados em
+// games/saldo/vitorias. Toda comparacao de PAR e par tem um vencedor
+// decisivo (nenhum par empata), entao uma implementacao que so verificasse
+// pares marcaria os tres como NAO empatados e deixaria o usort() (que so
+// compara dois a dois, sem enxergar o ciclo) inventar uma ordem que muda so
+// pela ordem de entrada dos jogadores - exatamente o problema que a coluna
+// empatado existe para evitar.
+$grupoCiclo = [];
+foreach ([1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009] as $id) {
+    $grupoCiclo[] = ['id' => $id, 'nome_exibicao' => "Jogador {$id}"];
+}
+$partidasCiclo = [
+    // 1001 bate 1002 no confronto direto.
+    [
+        'dupla_a_j1' => 1001, 'dupla_a_j2' => 1004,
+        'dupla_b_j1' => 1002, 'dupla_b_j2' => 1006,
+        'games_a' => 5, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    // 1002 bate 1003 no confronto direto.
+    [
+        'dupla_a_j1' => 1002, 'dupla_a_j2' => 1007,
+        'dupla_b_j1' => 1003, 'dupla_b_j2' => 1008,
+        'games_a' => 5, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    // 1003 bate 1001 no confronto direto - fecha o ciclo.
+    [
+        'dupla_a_j1' => 1003, 'dupla_a_j2' => 1009,
+        'dupla_b_j1' => 1001, 'dupla_b_j2' => 1005,
+        'games_a' => 5, 'games_b' => 3, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($grupoCiclo, $partidasCiclo);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+foreach ([1001, 1002, 1003] as $id) {
+    Teste::igual(8, $porId[$id]['games'], "jogador {$id} soma 8 games (ciclo)");
+    Teste::igual(0, $porId[$id]['saldo'], "jogador {$id} fica com saldo zero (ciclo)");
+    Teste::igual(1, $porId[$id]['vitorias'], "jogador {$id} tem 1 vitoria (ciclo)");
+}
+Teste::verdade($porId[1001]['empatado'], '1001 fica marcado como empatado dentro do ciclo (bate 1002, mas perde para 1003)');
+Teste::verdade($porId[1002]['empatado'], '1002 fica marcado como empatado dentro do ciclo (bate 1003, mas perde para 1001)');
+Teste::verdade($porId[1003]['empatado'], '1003 fica marcado como empatado dentro do ciclo (bate 1001, mas perde para 1002)');
+
+// --- empatado com 3 ou mais jogadores: confronto ORDENA o grupo (nenhum
+// fica marcado) -------------------------------------------------------------
+// O contrario do ciclo acima: um grupo de 3 jogadores empatados em
+// games/saldo/vitorias onde o confronto direto ordena o grupo INTEIRO de
+// forma estrita (2001 bate os outros dois, 2002 bate so 2003, 2003 nao bate
+// ninguem do grupo) tem que ficar SEM a marca de empate para os tres. Este
+// teste importa tanto quanto o do ciclo: sem ele, uma implementacao que
+// marcasse QUALQUER grupo de 3+ como empatado (em vez de checar se o
+// confronto realmente ordena) passaria pelo teste do ciclo e por este ao
+// mesmo tempo passaria por "sorte", nunca provando que o desempate por
+// confronto continua funcionando quando ele de fato decide.
+$grupoOrdenado = [];
+foreach ([2001, 2002, 2003, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027] as $id) {
+    $grupoOrdenado[] = ['id' => $id, 'nome_exibicao' => "Jogador {$id}"];
+}
+$partidasGrupoOrdenado = [
+    // 2001 bate 2002 no confronto direto.
+    [
+        'dupla_a_j1' => 2001, 'dupla_a_j2' => 2010,
+        'dupla_b_j1' => 2002, 'dupla_b_j2' => 2011,
+        'games_a' => 5, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    // 2001 bate 2003 no confronto direto (2001 bate os dois outros do grupo).
+    [
+        'dupla_a_j1' => 2001, 'dupla_a_j2' => 2012,
+        'dupla_b_j1' => 2003, 'dupla_b_j2' => 2013,
+        'games_a' => 5, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    // 2002 bate 2003 no confronto direto (2002 bate so 2003; 2003 nao bate ninguem do grupo).
+    [
+        'dupla_a_j1' => 2002, 'dupla_a_j2' => 2014,
+        'dupla_b_j1' => 2003, 'dupla_b_j2' => 2015,
+        'games_a' => 5, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    // Partidas extras (fora do grupo) so para igualar games/saldo/vitorias
+    // dos tres em 14/10/+4/2 vitorias, sem criar nenhum novo confronto entre
+    // 2001, 2002 e 2003 entre si.
+    [
+        'dupla_a_j1' => 2001, 'dupla_a_j2' => 2016,
+        'dupla_b_j1' => 2020, 'dupla_b_j2' => 2021,
+        'games_a' => 4, 'games_b' => 4, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 2002, 'dupla_a_j2' => 2017,
+        'dupla_b_j1' => 2022, 'dupla_b_j2' => 2023,
+        'games_a' => 6, 'games_b' => 2, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 2003, 'dupla_a_j2' => 2018,
+        'dupla_b_j1' => 2024, 'dupla_b_j2' => 2025,
+        'games_a' => 5, 'games_b' => 0, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 2003, 'dupla_a_j2' => 2019,
+        'dupla_b_j1' => 2026, 'dupla_b_j2' => 2027,
+        'games_a' => 3, 'games_b' => 0, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($grupoOrdenado, $partidasGrupoOrdenado);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+foreach ([2001, 2002, 2003] as $id) {
+    Teste::igual(14, $porId[$id]['games'], "jogador {$id} soma 14 games (grupo ordenado)");
+    Teste::igual(4, $porId[$id]['saldo'], "jogador {$id} fica com saldo +4 (grupo ordenado)");
+    Teste::igual(2, $porId[$id]['vitorias'], "jogador {$id} tem 2 vitorias (grupo ordenado)");
+}
+
+$ids = array_column($linhas, 'inscricao_id');
+Teste::verdade(
+    array_search(2001, $ids, true) < array_search(2002, $ids, true)
+        && array_search(2002, $ids, true) < array_search(2003, $ids, true),
+    'o confronto direto ordena o grupo inteiro (2001, depois 2002, depois 2003)'
+);
+Teste::verdade(!$porId[2001]['empatado'], '2001 nao fica marcado como empatado: o confronto direto ordena o grupo inteiro');
+Teste::verdade(!$porId[2002]['empatado'], '2002 nao fica marcado como empatado: o confronto direto ordena o grupo inteiro');
+Teste::verdade(!$porId[2003]['empatado'], '2003 nao fica marcado como empatado: o confronto direto ordena o grupo inteiro');
 
 exit(Teste::resumo());

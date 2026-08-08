@@ -31,6 +31,12 @@ final class Sorteio
             $ids[$j] = $guarda;
         }
 
+        // Resemeia o gerador global com um valor imprevisivel: a semente do
+        // sorteio fica gravada no banco (nao e secreta), entao deixar o
+        // estado global preso a ela deixaria qualquer mt_rand() futuro
+        // no mesmo processo previsivel.
+        mt_srand(random_int(1, 2147483647), MT_RAND_MT19937);
+
         return $ids;
     }
 }

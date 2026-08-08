@@ -24,4 +24,10 @@ Teste::verdade($ids !== $primeira, 'a ordem sorteada difere da ordem de entrada'
 $semente = Sorteio::gerarSemente();
 Teste::verdade($semente >= 1 && $semente <= 2147483647, 'a semente cabe em inteiro sem sinal de 32 bits');
 
+Sorteio::ordenar($ids, 12345);
+$randApos1 = mt_rand();
+Sorteio::ordenar($ids, 12345);
+$randApos2 = mt_rand();
+Teste::verdade($randApos1 !== $randApos2, 'nao deixa o gerador global preso a semente do sorteio');
+
 exit(Teste::resumo());

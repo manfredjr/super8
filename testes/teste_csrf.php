@@ -10,6 +10,9 @@ session_start();
 
 echo "CSRF e escape\n";
 
+Teste::igual(PHP_SESSION_ACTIVE, session_status(), 'a sessao esta ativa de verdade, nao e um array solto');
+Teste::verdade(session_id() !== '', 'a sessao tem um id de verdade, nao esta vazia');
+
 Teste::igual('&lt;script&gt;', e('<script>'), 'escapa sinal de menor e maior');
 Teste::igual('&quot;aspas&quot;', e('"aspas"'), 'escapa aspas retas');
 Teste::igual('&#039;', e("'"), 'escapa apostrofo');

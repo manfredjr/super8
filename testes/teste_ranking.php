@@ -484,6 +484,101 @@ Teste::igual(
     'string vazia nas duas datas continua tratada como sem filtro'
 );
 
+// --- Data com o FORMATO certo mas calendario impossivel (mes 13, dia que
+// nao existe no mes) tambem tem que ser tratada como sem filtro. O
+// comportamento do MariaDB NAO e uniforme entre os dois jeitos de ser
+// impossivel, verificado direto neste servidor (SHOW WARNINGS): um mes
+// fora de 1-12 dispara o aviso 1292 (Truncated incorrect datetime value) e
+// a comparacao vira "verdadeira para tudo", alargando a janela para todo
+// mundo, exatamente o sintoma que este item descreve. Ja um DIA fora do
+// mes (30 de fevereiro, 31 de abril) NAO dispara aviso nenhum neste
+// MariaDB - o valor e aceito como data literal e comparado componente a
+// componente (ano, mes, dia) sem validar se o dia cabe no mes, o que da um
+// resultado errado DIFERENTE (nem "tudo" nem "nada": exclui so os eventos
+// cuja tripla ano-mes-dia fique "lexicograficamente antes" do valor
+// impossivel). Por isso os testes de dia impossivel abaixo usam um evento
+// dedicado, colocado exatamente onde esse defeito o excluiria por engano,
+// em vez de comparar a lista inteira com o cenario sem filtro. -----------
+Teste::igual(
+    $semFiltroNenhum,
+    Ranking::acumulado($pdo, '2026-13-01', null),
+    'mes 13 (impossivel) bate no formato AAAA-MM-DD mas nao existe no calendario: tratado como sem filtro'
+);
+
+$jogadorJaneiroId = Auth::cadastrar($pdo, 'Jogador Janeiro', "jogjaneiro{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoJaneiroId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Janeiro', 'data_evento' => '2026-01-10',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoJaneiroId, 'Jogador Janeiro', $jogadorJaneiroId);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoJaneiroId, "Convidado JAN {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoJaneiroId, 7002);
+$buscaPartidasJaneiro = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+$buscaPartidasJaneiro->execute([$campeonatoJaneiroId]);
+foreach ($buscaPartidasJaneiro->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    Placar::gravar($pdo, $campeonatoJaneiroId, (int) $partidaId, 6, 2, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoJaneiroId]);
+
+// "2026-02-30" nao existe, mas se comparado cru (ano, mes, dia) fica
+// "depois" de qualquer data de janeiro/2026 (mes 02 > mes 01) - um "de"
+// sem checkdate() excluiria o evento de janeiro por engano em vez de virar
+// sem filtro.
+Teste::verdade(
+    contemJogador(Ranking::acumulado($pdo, '2026-02-30', null), $jogadorJaneiroId),
+    'dia 30 de fevereiro (nao existe, mas dentro da faixa 1-31) e tratado como sem filtro: o evento de janeiro/2026 nao pode ser excluido por uma comparacao crua de ano-mes-dia'
+);
+
+// "2026-04-31" nao existe; comparado cru como limite superior ("ate"),
+// fica "antes" de qualquer data de maio/2026 (mes 04 < mes 05) - um "ate"
+// sem checkdate() excluiria o evento 1 (2026-05-10, $jogadorId) por
+// engano.
+Teste::verdade(
+    contemJogador(Ranking::acumulado($pdo, null, '2026-04-31'), $jogadorId),
+    'dia 31 de abril (abril so tem 30 dias) e tratado como sem filtro: o evento 1 (maio/2026) nao pode ser excluido por uma comparacao crua de ano-mes-dia'
+);
+
+// --- 29 de fevereiro: a fronteira exata que checkdate() decide. Existe de
+// verdade em 2028 (ano bissexto) e NAO existe em 2027 (ano comum) --------
+$jogadorBissextoId = Auth::cadastrar($pdo, 'Jogador Bissexto', "jogbissexto{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoBissextoId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa Bissexto', 'data_evento' => '2028-02-29',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoBissextoId, 'Jogador Bissexto', $jogadorBissextoId);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoBissextoId, "Convidado BIS {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoBissextoId, 7001);
+$buscaPartidasBissexto = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+$buscaPartidasBissexto->execute([$campeonatoBissextoId]);
+foreach ($buscaPartidasBissexto->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    Placar::gravar($pdo, $campeonatoBissextoId, (int) $partidaId, 6, 2, $organizadorId);
+}
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoBissextoId]);
+
+Teste::verdade(
+    contemJogador(Ranking::acumulado($pdo, '2028-02-29', null), $jogadorBissextoId),
+    '29 de fevereiro de 2028 (ano bissexto, essa data existe de verdade) filtra normalmente e inclui o evento marcado nela'
+);
+Teste::verdade(
+    !contemJogador(Ranking::acumulado($pdo, '2028-03-01', null), $jogadorBissextoId),
+    'confirma que uma data valida continua filtrando de verdade: "de" = 2028-03-01 exclui o evento de 2028-02-29'
+);
+
+$semFiltroComBissexto = Ranking::acumulado($pdo, null, null);
+Teste::igual(
+    $semFiltroComBissexto,
+    Ranking::acumulado($pdo, '2027-02-29', null),
+    '29 de fevereiro de 2027 (2027 nao e bissexto, essa data NAO existe) e tratado como sem filtro, nao como um "de" que excluiria tudo'
+);
+
 // --- ORDER BY: para um ranking, a ordem E o produto. Nada mais no projeto
 // re-ordena o array devolvido por Ranking::acumulado, entao um ORDER BY
 // quebrado (removido ou invertido) devolveria o pior jogador em primeiro

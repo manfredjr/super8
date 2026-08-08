@@ -112,12 +112,25 @@ final class Campeonato
                 // distingue QUAL das duas UNIQUE KEY foi violada - as duas
                 // usam o mesmo codigo - entao olhamos tambem o texto da
                 // mensagem do driver (errorInfo[2], nunca a mensagem
-                // traduzida do PDO), que o MariaDB sempre preenche com o
-                // nome da chave violada ("... for key 'uk_camp_jogador'" ou
-                // "... for key 'uk_camp_nome'"). Qualquer outro 23000 sobe
+                // traduzida do PDO), que o MariaDB sempre preenche no
+                // formato "Duplicate entry '<valor>' for key '<chave>'".
+                // O <valor> vem do que foi inserido - um nome_exibicao
+                // escolhido pelo organizador, por exemplo - entao um
+                // str_contains() procurando 'uk_camp_jogador' EM QUALQUER
+                // PARTE da mensagem cai na armadilha de um competidor
+                // literalmente chamado "uk_camp_jogador": a mensagem de
+                // nome duplicado ficaria "Duplicate entry '146-uk_camp_
+                // jogador' for key 'uk_camp_nome'", e o str_contains()
+                // acharia a substring dentro do VALOR, nao da CHAVE, e
+                // devolveria a mensagem errada (jogador duplicado, quando o
+                // problema de verdade e nome duplicado). Ancorar no SUFIXO
+                // exato "for key 'uk_camp_jogador'" evita isso: essa parte
+                // da mensagem e sempre escrita pelo MariaDB DEPOIS do valor,
+                // com o nome real da chave violada - nunca conteudo do
+                // valor que o usuario controla. Qualquer outro 23000 sobe
                 // cru, sem disfarcar o problema real.
                 if (($excecao->errorInfo[1] ?? null) === 1062) {
-                    if (str_contains($excecao->errorInfo[2] ?? '', 'uk_camp_jogador')) {
+                    if (str_ends_with($excecao->errorInfo[2] ?? '', "for key 'uk_camp_jogador'")) {
                         throw new RuntimeException('Este jogador ja esta inscrito neste campeonato.');
                     }
                     throw new RuntimeException('Ja existe um competidor com esse nome.');

@@ -435,6 +435,30 @@ Teste::igual(
     'nome duplicado continua com a mensagem de sempre, diferente da mensagem de jogador duplicado'
 );
 
+// Rodada de revisao (Task 9, item 2 da segunda rodada): a mensagem do
+// driver para "Duplicate entry" embute o VALOR duplicado, nao so o nome
+// da chave - "Duplicate entry '<valor>' for key '<chave>'". Um
+// str_contains() procurando 'uk_camp_jogador' EM QUALQUER PARTE dessa
+// mensagem cairia na armadilha de um competidor literalmente chamado
+// "uk_camp_jogador": a mensagem de nome duplicado (uk_camp_nome) ficaria
+// "Duplicate entry '<id>-uk_camp_jogador' for key 'uk_camp_nome'", e o
+// str_contains() acharia a substring dentro do VALOR e devolveria a
+// mensagem de jogador duplicado por engano. inscrever() agora ancora no
+// SUFIXO exato "for key 'uk_camp_jogador'" (str_ends_with), que so bate
+// quando a CHAVE de verdade foi essa, nunca por causa do valor.
+Campeonato::inscrever($pdo, $campeonatoId3, 'uk_camp_jogador', null);
+$erroNomeAdversario = null;
+try {
+    Campeonato::inscrever($pdo, $campeonatoId3, 'uk_camp_jogador', null);
+} catch (RuntimeException $excecao) {
+    $erroNomeAdversario = $excecao->getMessage();
+}
+Teste::igual(
+    'Ja existe um competidor com esse nome.',
+    $erroNomeAdversario,
+    'um competidor chamado literalmente "uk_camp_jogador" ainda recebe a mensagem de NOME duplicado, nao a de jogador duplicado (a chave violada foi uk_camp_nome, o texto "uk_camp_jogador" so aparece dentro do valor)'
+);
+
 // NULL nao colide em UNIQUE KEY: dois convidados sem conta (jogador_id
 // null) continuam podendo coexistir no mesmo campeonato - a UNIQUE KEY
 // uk_camp_jogador nao pode impedir isso, senao um campeonato so poderia
@@ -442,7 +466,7 @@ Teste::igual(
 Campeonato::inscrever($pdo, $campeonatoId3, 'Convidado Um', null);
 Campeonato::inscrever($pdo, $campeonatoId3, 'Convidado Dois', null);
 Teste::igual(
-    3,
+    4,
     count(Campeonato::listarInscricoes($pdo, $campeonatoId3)),
     'dois convidados sem conta (jogador_id null) coexistem no mesmo campeonato: NULL nunca colide em UNIQUE KEY'
 );

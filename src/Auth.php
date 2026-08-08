@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Regra de excecao deste projeto, valida aqui e em Campeonato: quando quem
+ * chama mandou um valor que ele mesmo poderia ter validado antes (formato,
+ * tamanho, faixa), a excecao e InvalidArgumentException. Quando e o estado
+ * ja guardado no banco que recusa a operacao (duplicidade, limite atingido,
+ * transicao invalida), a excecao e RuntimeException.
+ */
 final class Auth
 {
     private const MAX_TENTATIVAS = 5;
@@ -37,7 +44,10 @@ final class Auth
         $busca = $pdo->prepare('SELECT id FROM users WHERE email = ?');
         $busca->execute([$email]);
         if ($busca->fetch() !== false) {
-            throw new InvalidArgumentException('Ja existe conta com esse e-mail.');
+            // Duplicidade e estado do banco que recusa a operacao, nao valor
+            // mal formado que quem chama poderia ter validado sozinho: pela
+            // regra do topo do arquivo, e RuntimeException.
+            throw new RuntimeException('Ja existe conta com esse e-mail.');
         }
 
         $insere = $pdo->prepare(
@@ -55,7 +65,7 @@ final class Auth
             // o e-mail duplicado, entao a mensagem continua a mesma do caminho
             // normal.
             if ($excecao->getCode() === '23000') {
-                throw new InvalidArgumentException('Ja existe conta com esse e-mail.');
+                throw new RuntimeException('Ja existe conta com esse e-mail.');
             }
             throw $excecao;
         }

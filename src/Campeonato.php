@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Regra de excecao deste projeto, valida aqui e em Auth: quando quem chama
+ * mandou um valor que ele mesmo poderia ter validado antes (formato,
+ * tamanho, faixa), a excecao e InvalidArgumentException. Quando e o estado
+ * ja guardado no banco que recusa a operacao (duplicidade, limite atingido,
+ * transicao invalida), a excecao e RuntimeException.
+ */
 final class Campeonato
 {
     /**

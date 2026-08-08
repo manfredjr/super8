@@ -49,10 +49,13 @@ try {
     }
     Teste::verdade($erro !== null, 'recusa senha com menos de 8 caracteres');
 
+    // I1 (rodada de revisao): e-mail duplicado e estado do banco que recusa
+    // a operacao (duplicidade), nao valor mal formado - pela regra do topo
+    // de Auth.php, a excecao e RuntimeException, nao InvalidArgumentException.
     $erro = null;
     try {
         Auth::cadastrar($pdo, 'Repetido', $email, 'senhaforte123');
-    } catch (InvalidArgumentException $excecao) {
+    } catch (RuntimeException $excecao) {
         $erro = $excecao->getMessage();
     }
     Teste::verdade($erro !== null, 'recusa e-mail ja cadastrado');
@@ -125,7 +128,7 @@ try {
     $erro = null;
     try {
         Auth::cadastrar($pdo, 'Perdeu a corrida', $emailCorrida, 'senhaforte123');
-    } catch (InvalidArgumentException $excecao) {
+    } catch (RuntimeException $excecao) {
         $erro = $excecao->getMessage();
     }
     Teste::igual('Ja existe conta com esse e-mail.', $erro, 'corrida de cadastro: quem perde recebe a mesma mensagem de e-mail duplicado, nao um erro de banco cru');

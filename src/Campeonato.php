@@ -116,6 +116,12 @@ final class Campeonato
 
         $semente = $semente ?? Sorteio::gerarSemente();
         $ids = array_map(static fn (array $inscricao): int => (int) $inscricao['id'], $inscricoes);
+        // A ordem dos ids antes do sorteio tem que depender so dos proprios ids,
+        // nunca de um posicao_sorteio deixado por um sorteio anterior (isso e so
+        // ordenacao de exibicao, de listarInscricoes). Sem este sort, refazer o
+        // sorteio com a mesma semente para de reproduzir o mesmo chaveamento, e
+        // a promessa de auditoria (mesma semente, mesmo resultado) cai por terra.
+        sort($ids);
         $ordenados = Sorteio::ordenar($ids, $semente);
 
         // Esta funcao pode ser chamada dentro de uma transacao que quem chamou

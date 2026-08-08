@@ -7,6 +7,40 @@ require __DIR__ . '/../src/Sorteio.php';
 require __DIR__ . '/../src/Auth.php';
 require __DIR__ . '/../src/Campeonato.php';
 
+/**
+ * Mapa id da inscricao => posicao_sorteio, ordenado pela chave. Serve para
+ * comparar dois sorteios sem depender da ordem de exibicao de
+ * listarInscricoes, que muda conforme as posicoes ja atribuidas.
+ */
+function mapaPosicoes(PDO $pdo, int $campeonatoId): array
+{
+    $mapa = [];
+    foreach (Campeonato::listarInscricoes($pdo, $campeonatoId) as $inscricao) {
+        $mapa[(int) $inscricao['id']] = (int) $inscricao['posicao_sorteio'];
+    }
+    ksort($mapa);
+
+    return $mapa;
+}
+
+/** As 14 partidas, em ordem de rodada e quadra, com os 4 ids de inscricao de cada uma. */
+function partidasBrutas(PDO $pdo, int $campeonatoId): array
+{
+    $busca = $pdo->prepare(
+        'SELECT r.numero, p.quadra, p.dupla_a_j1, p.dupla_a_j2, p.dupla_b_j1, p.dupla_b_j2
+         FROM partidas p
+         JOIN rodadas r ON r.id = p.rodada_id
+         WHERE r.campeonato_id = ?
+         ORDER BY r.numero, p.quadra'
+    );
+    $busca->execute([$campeonatoId]);
+
+    return array_map(
+        static fn (array $linha): array => array_map('intval', $linha),
+        $busca->fetchAll()
+    );
+}
+
 echo "Campeonato\n";
 
 $pdo = db();
@@ -77,10 +111,38 @@ Teste::igual(14, (int) $contaPartidas->fetchColumn(), 'gera 14 partidas');
 
 Teste::verdade(!Campeonato::temPlacarLancado($pdo, $campeonatoId), 'ainda nao tem placar lancado');
 
+// Estado de auditoria: campeonato ja sorteado, com posicao_sorteio gravada
+// para os 8 inscritos. E exatamente esse o estado em que alguem pediria para
+// refazer o sorteio com a mesma semente e conferir que da o mesmo resultado.
+$mapaPosicoesAntes = mapaPosicoes($pdo, $campeonatoId);
+$partidasAntes = partidasBrutas($pdo, $campeonatoId);
+
 Campeonato::sortear($pdo, $campeonatoId, 4242);
 
 $contaPartidas->execute([$campeonatoId]);
 Teste::igual(14, (int) $contaPartidas->fetchColumn(), 'refazer o sorteio nao duplica partidas');
+
+$mapaPosicoesDepois = mapaPosicoes($pdo, $campeonatoId);
+$partidasDepois = partidasBrutas($pdo, $campeonatoId);
+
+Teste::igual(
+    $mapaPosicoesAntes,
+    $mapaPosicoesDepois,
+    'refazer o sorteio com a mesma semente reproduz o mesmo mapeamento de posicoes (auditoria)'
+);
+Teste::igual(
+    $partidasAntes,
+    $partidasDepois,
+    'refazer o sorteio com a mesma semente reproduz exatamente as mesmas 14 partidas (auditoria)'
+);
+
+$semente9999 = Campeonato::sortear($pdo, $campeonatoId, 9999);
+Teste::igual(9999, $semente9999, 'sorteia de novo com outra semente');
+$mapaPosicoesOutraSemente = mapaPosicoes($pdo, $campeonatoId);
+Teste::verdade(
+    $mapaPosicoesAntes !== $mapaPosicoesOutraSemente,
+    'uma semente diferente muda o mapeamento de posicoes (a asserta acima nao passa a toa)'
+);
 
 $pdo->rollBack();
 

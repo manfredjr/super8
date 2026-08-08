@@ -7,6 +7,18 @@ require __DIR__ . '/../src/Auth.php';
 
 echo "Acesso\n";
 
+// M3 (rodada de revisao): so incluir acesso.php ja tem que deixar a sessao
+// ativa, sem exigir uma chamada explicita de iniciarSessao() - um ponto de
+// entrada que esquecesse dessa chamada cairia num redirecionamento infinito
+// para o login sem erro nenhum apontando o motivo, porque exigirLogin()
+// nunca enxergaria um usuario gravado numa sessao que nunca chegou a
+// comecar de verdade.
+Teste::igual(
+    PHP_SESSION_ACTIVE,
+    session_status(),
+    'M3: so incluir config/acesso.php ja inicia a sessao sozinho, sem exigir chamada explicita'
+);
+
 $pdo = db();
 
 /**

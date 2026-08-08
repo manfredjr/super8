@@ -9,6 +9,13 @@
 
 require_once __DIR__ . '/sessao.php';
 
+// Chama no momento do include, e nao dentro de cada funcao: sem isso, um
+// ponto de entrada que esquecesse de iniciar a sessao antes de usar as
+// funcoes deste arquivo cairia num redirecionamento infinito para o login
+// (ou pior, num $_SESSION que nunca persiste entre requisicoes) sem erro
+// nenhum avisando o motivo.
+iniciarSessao();
+
 /** Copia da sessao, so para exibicao. Nao revalida nada no banco. */
 function usuarioLogado(): ?array
 {

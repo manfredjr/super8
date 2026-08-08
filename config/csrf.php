@@ -1,5 +1,13 @@
 <?php
 
+require_once __DIR__ . '/sessao.php';
+
+// Chama no momento do include, pelo mesmo motivo de config/acesso.php: este
+// arquivo le e escreve $_SESSION (csrf_token/csrf_conferir) sem exigir
+// sessao.php antes, e um ponto de entrada que esquecesse de iniciar a sessao
+// sozinho falharia em silencio, sem erro nenhum apontando o motivo.
+iniciarSessao();
+
 function e(?string $texto): string
 {
     return htmlspecialchars($texto ?? '', ENT_QUOTES, 'UTF-8');

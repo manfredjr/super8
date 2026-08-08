@@ -745,6 +745,83 @@ Teste::verdade(
     'entre dois jogadores empatados em games, o desempate e por nome em ordem alfabetica (Alfa antes de Zulu), mesmo Zulu tendo sido cadastrado primeiro'
 );
 
+// ============================================================================
+// M7 (rodada de revisao): Placar::classificarLinhas exige encerrada = 1 E
+// os dois games preenchidos para contar uma partida como jogada;
+// Ranking::acumulado, antes desta correcao, exigia so p.encerrada = 1 - as
+// duas agregacoes declaravam regras diferentes para a mesma coisa. Uma
+// partida com encerrada = 1 e games nulos e inalcancavel por Placar::gravar
+// (que sempre grava os dois games juntos), entao este teste fabrica esse
+// estado direto no banco, do mesmo jeito que a propria descricao do achado
+// descreve. Campeonato::encerrar so trata como pendente uma partida com
+// encerrada = 0 E os dois games nulos, entao esta partida corrompida
+// (encerrada = 1) NAO bloqueia o encerramento - e exatamente por isso o
+// buraco existe: um evento com uma partida assim consegue encerrar normal.
+// ============================================================================
+$jogadorM7Id = Auth::cadastrar($pdo, 'Jogador M7', "jogm7{$sufixo}@exemplo.com", 'senhaforte123');
+$campeonatoM7Id = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa M7', 'data_evento' => '2026-08-01',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::inscrever($pdo, $campeonatoM7Id, 'Jogador M7', $jogadorM7Id);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoM7Id, "Convidado M7 {$numero} {$sufixo}", null);
+}
+Campeonato::sortear($pdo, $campeonatoM7Id, 8100);
+
+$buscaPosicaoM7 = $pdo->prepare('SELECT posicao_sorteio FROM inscricoes WHERE campeonato_id = ? AND jogador_id = ?');
+$buscaPosicaoM7->execute([$campeonatoM7Id, $jogadorM7Id]);
+$posicaoM7 = (int) $buscaPosicaoM7->fetchColumn();
+
+// Escolhe DETERMINISTICAMENTE a partida da rodada 1 em que jogadorM7 joga
+// (via quadraDaRodada, ja definida acima para o cenario da Etapa Parcial),
+// e nao uma partida qualquer: sem isso, o teste so provaria algo por
+// coincidencia de sorteio, e passaria mesmo com o defeito presente se
+// jogadorM7 nao calhasse de jogar a partida corrompida.
+$quadraM7 = quadraDaRodada(1, $posicaoM7) + 1;
+$buscaPartidaCorrompidaM7 = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
+     WHERE r.campeonato_id = ? AND r.numero = 1 AND p.quadra = ?'
+);
+$buscaPartidaCorrompidaM7->execute([$campeonatoM7Id, $quadraM7]);
+$idPartidaCorrompidaM7 = (int) $buscaPartidaCorrompidaM7->fetchColumn();
+
+$buscaTodasPartidasM7 = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+$buscaTodasPartidasM7->execute([$campeonatoM7Id]);
+foreach ($buscaTodasPartidasM7->fetchAll(PDO::FETCH_COLUMN) as $partidaId) {
+    if ((int) $partidaId === $idPartidaCorrompidaM7) {
+        continue; // fica de proposito corrompida, gravada direto abaixo.
+    }
+    Placar::gravar($pdo, $campeonatoM7Id, (int) $partidaId, 6, 4, $organizadorId);
+}
+
+$pdo->prepare('UPDATE partidas SET encerrada = 1, games_a = NULL, games_b = NULL WHERE id = ?')
+    ->execute([$idPartidaCorrompidaM7]);
+
+Campeonato::encerrar($pdo, $campeonatoM7Id);
+$campeonatoM7 = Campeonato::buscar($pdo, $campeonatoM7Id);
+Teste::igual(
+    'encerrado',
+    $campeonatoM7['status'],
+    'checagem do proprio teste: o campeonato M7 encerra mesmo com a partida corrompida (encerrada = 1 nao conta como pendente)'
+);
+
+$linhasM7 = Ranking::acumulado($pdo, null, null);
+$linhaM7 = null;
+foreach ($linhasM7 as $linha) {
+    if ((int) $linha['jogador_id'] === $jogadorM7Id) {
+        $linhaM7 = $linha;
+    }
+}
+Teste::verdade($linhaM7 !== null, 'M7: o jogador continua aparecendo no ranking mesmo com uma partida corrompida no proprio evento (as outras 6 contam)');
+Teste::igual(
+    6,
+    (int) $linhaM7['jogadas'],
+    'M7: a partida corrompida (encerrada = 1, games nulos) NAO entra na contagem de jogadas do ranking - antes desta correcao, p.encerrada = 1 sozinho bastava e contaria 7'
+);
+
 $pdo->rollBack();
 
 exit(Teste::resumo());

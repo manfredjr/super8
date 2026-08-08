@@ -20,7 +20,20 @@ final class Ranking
      */
     public static function acumulado(PDO $pdo, ?string $de, ?string $ate): array
     {
-        $condicoes = ["c.status = 'encerrado'", 'i.jogador_id IS NOT NULL', 'p.encerrada = 1'];
+        // p.games_a IS NOT NULL: Placar::classificarLinhas exige encerrada = 1
+        // E os dois games preenchidos para contar uma partida como jogada;
+        // sem esta condicao aqui, as duas agregacoes do projeto declarariam
+        // regras diferentes para a mesma coisa, e uma partida com
+        // encerrada = 1 mas sem placar entraria na CONTAGEM de jogadas do
+        // ranking sem somar nada aos games. Placar::gravar sempre grava os
+        // dois games juntos, entao isso e inalcancavel pelo caminho normal
+        // hoje, mas a regra precisa estar declarada aqui mesmo assim.
+        $condicoes = [
+            "c.status = 'encerrado'",
+            'i.jogador_id IS NOT NULL',
+            'p.encerrada = 1',
+            'p.games_a IS NOT NULL',
+        ];
         $valores = [];
 
         if (Validador::dataValida($de)) {

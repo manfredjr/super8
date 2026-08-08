@@ -7,7 +7,7 @@ Sistema de torneios de padel no formato Super 8. Oito jogadores, 7 rodadas, todo
 1. Ligar Apache e MySQL no painel do XAMPP.
 2. Criar o banco: `C:\xampp\mysql\bin\mysql.exe -u root < sql/schema.sql`
 3. Copiar `config/config.exemplo.php` para `config/config.php` e ajustar as credenciais.
-4. Abrir `http://localhost/jogosaula/public/`.
+4. Abrir `http://localhost/super8/public/`.
 
 ## Rodar os testes
 

@@ -1,0 +1,2896 @@
+# Super 8 Padel, etapa 1 - Plano de implementacao
+
+> **Para trabalhadores agenticos:** SUB-SKILL OBRIGATORIA: usar superpowers:subagent-driven-development (recomendado) ou superpowers:executing-plans para executar este plano tarefa por tarefa. Os passos usam caixa de selecao (`- [ ]`) para acompanhamento.
+
+**Objetivo:** entregar o motor do Super 8 e o ranking acumulado em PHP puro, rodando no XAMPP, com login por e-mail e senha e a modelagem ja preparada para o login com Google da etapa 2.
+
+**Arquitetura:** quatro camadas separadas. `src/` guarda as regras em classes estaticas sem uma linha de HTML e sem dependencia de sessao, o que permite testar por linha de comando. `public/` tem os pontos de entrada, `views/` as telas e `config/` a conexao, a sessao e o CSRF. A tabela de rodizio das 7 rodadas e constante no codigo; o sorteio so decide quem ocupa cada posicao de 1 a 8.
+
+**Stack:** PHP 8.2.12 (XAMPP), MariaDB 10.4.32 (o "MySQL" do XAMPP nesta maquina), PDO com prepared statements, sem framework e sem Composer. Testes em PHP puro executados pelo CLI.
+
+## Restricoes globais
+
+- Pasta de trabalho e teste: `C:\xampp\htdocs\super8`. O repositorio git fica nessa pasta.
+- Nenhum arquivo pode ser apagado. Arquivo que sair de uso vai para `C:\COWORK\CODE\SUPER8\_LIXEIRA`.
+- Pacote de producao vai para `C:\COWORK\CODE\SUPER8\_PUBLICAR\enviar`.
+- Banco de dados: `super8`, charset `utf8mb4`, collation `utf8mb4_unicode_ci`.
+- Todo SQL passa por prepared statement. Nenhuma variavel concatenada em string SQL, sem excecao.
+- Toda saida de dado do banco ou de formulario passa pela funcao `e()` (`htmlspecialchars` com `ENT_QUOTES`).
+- Todo POST confere token CSRF antes de gravar.
+- Senha com `password_hash` e `PASSWORD_ARGON2ID`, minimo de 8 caracteres.
+- Texto de interface e de documentacao segue a skill `/anthropic-skills:humanizar-ptbr`. Sem travessao longo, sem aspas curvas, sem emoji.
+- Classes de `src/` nao podem chamar `session_start`, `header`, `echo` nem tocar em `$_POST` ou `$_SESSION`. Elas recebem PDO e valores por parametro. Isso e o que torna os testes possiveis.
+- Um commit por tarefa concluida, com mensagem em portugues no formato `tipo: descricao`.
+
+---
+
+## Mapa de arquivos
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `config/config.exemplo.php` | modelo das credenciais, vai para o git |
+| `config/config.php` | credenciais reais, fora do git |
+| `config/db.php` | funcao `db()` que devolve a conexao PDO |
+| `config/sessao.php` | inicio de sessao com cookie seguro |
+| `config/csrf.php` | token CSRF e funcao `e()` |
+| `config/acesso.php` | usuario logado, exige login, exige dono do campeonato |
+| `src/Rodizio.php` | tabela fixa das 7 rodadas |
+| `src/Sorteio.php` | embaralhamento reproduzivel por semente |
+| `src/Auth.php` | cadastro, login, bloqueio por tentativa, dono do campeonato |
+| `src/Campeonato.php` | campeonato, inscricoes, sorteio, chaveamento |
+| `src/Placar.php` | gravacao de placar e classificacao do evento |
+| `src/Ranking.php` | agregacao entre eventos por periodo |
+| `views/*.php` | telas |
+| `public/*.php` | pontos de entrada |
+| `sql/schema.sql` | criacao das tabelas |
+| `testes/*.php` | testes por linha de comando |
+| `admin/anonimizar.php` | exclusao a pedido do titular, por linha de comando |
+
+---
+
+## Tarefa 1: Esqueleto do projeto, git e runner de testes
+
+**Arquivos:**
+- Criar: `C:\xampp\htdocs\super8\.gitignore`
+- Criar: `C:\xampp\htdocs\super8\README.md`
+- Criar: `C:\xampp\htdocs\super8\testes\asserta.php`
+- Criar: `C:\xampp\htdocs\super8\testes\executar.php`
+
+**Interfaces:**
+- Produz: classe `Teste` com `Teste::igual($esperado, $obtido, string $descricao)`, `Teste::verdade(bool $condicao, string $descricao)`, `Teste::resumo(): int`. Todas as tarefas seguintes usam essas tres.
+
+- [ ] **Passo 1: criar a estrutura de pastas**
+
+```bash
+mkdir -p /c/xampp/htdocs/super8/{config,src,views,public/css,sql,testes}
+cd /c/xampp/htdocs/super8
+git init
+```
+
+- [ ] **Passo 2: escrever o `.gitignore`**
+
+```
+config/config.php
+*.log
+.DS_Store
+Thumbs.db
+```
+
+- [ ] **Passo 3: escrever `testes/asserta.php`**
+
+```php
+<?php
+
+final class Teste
+{
+    private static int $passou = 0;
+    private static int $falhou = 0;
+
+    public static function igual(mixed $esperado, mixed $obtido, string $descricao): void
+    {
+        if ($esperado === $obtido) {
+            self::$passou++;
+            echo "  ok    {$descricao}\n";
+            return;
+        }
+        self::$falhou++;
+        echo "  FALHA {$descricao}\n";
+        echo "        esperado: " . var_export($esperado, true) . "\n";
+        echo "        obtido:   " . var_export($obtido, true) . "\n";
+    }
+
+    public static function verdade(bool $condicao, string $descricao): void
+    {
+        self::igual(true, $condicao, $descricao);
+    }
+
+    public static function resumo(): int
+    {
+        echo "\n" . self::$passou . " passaram, " . self::$falhou . " falharam\n";
+        return self::$falhou === 0 ? 0 : 1;
+    }
+}
+```
+
+- [ ] **Passo 4: escrever `testes/executar.php`**
+
+```php
+<?php
+
+$arquivos = glob(__DIR__ . '/teste_*.php');
+$falhou = 0;
+
+foreach ($arquivos as $arquivo) {
+    echo "\n=== " . basename($arquivo) . " ===\n";
+    $saida = [];
+    $codigo = 0;
+    exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($arquivo), $saida, $codigo);
+    echo implode("\n", $saida) . "\n";
+    if ($codigo !== 0) {
+        $falhou++;
+    }
+}
+
+echo "\n" . ($falhou === 0 ? 'TUDO PASSOU' : "{$falhou} arquivo(s) com falha") . "\n";
+exit($falhou === 0 ? 0 : 1);
+```
+
+- [ ] **Passo 5: rodar o runner e confirmar que ele funciona sem testes**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\executar.php`
+Esperado: imprime `TUDO PASSOU` e sai com codigo 0, porque ainda nao ha arquivo `teste_*.php`.
+
+- [ ] **Passo 6: escrever o `README.md`**
+
+```markdown
+# Super 8 Padel
+
+Sistema de torneios de padel no formato Super 8. Oito jogadores, 7 rodadas, todos jogam com e contra todos, pontuacao individual por games vencidos.
+
+## Rodar local
+
+1. Ligar Apache e MySQL no painel do XAMPP.
+2. Criar o banco: `C:\xampp\mysql\bin\mysql.exe -u root < sql/schema.sql`
+3. Copiar `config/config.exemplo.php` para `config/config.php` e ajustar as credenciais.
+4. Abrir `http://localhost/super8/public/`.
+
+## Rodar os testes
+
+`C:\xampp\php\php.exe testes/executar.php`
+```
+
+- [ ] **Passo 7: commit**
+
+```bash
+git add .gitignore README.md testes/
+git commit -m "chore: esqueleto do projeto e runner de testes"
+```
+
+---
+
+## Tarefa 2: Tabela de rodizio das 7 rodadas
+
+**Arquivos:**
+- Criar: `src/Rodizio.php`
+- Teste: `testes/teste_rodizio.php`
+
+**Interfaces:**
+- Consome: `Teste` da tarefa 1.
+- Produz: `Rodizio::RODADAS` (array de 7 rodadas, cada uma com 2 partidas, cada partida com duas duplas de posicoes), `Rodizio::todasAsDuplas(): array` (28 strings no formato `menor-maior`), `Rodizio::jogadoresDaRodada(int $numero): array`.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_rodizio.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../src/Rodizio.php';
+
+echo "Rodizio\n";
+
+Teste::igual(7, count(Rodizio::RODADAS), 'tem 7 rodadas');
+
+foreach (Rodizio::RODADAS as $numero => $partidas) {
+    Teste::igual(2, count($partidas), "rodada {$numero} tem 2 partidas");
+
+    $jogadores = [];
+    foreach ($partidas as $partida) {
+        Teste::igual(2, count($partida), "rodada {$numero} tem 2 duplas por partida");
+        foreach ($partida as $dupla) {
+            Teste::igual(2, count($dupla), "rodada {$numero} tem duplas de 2 jogadores");
+            $jogadores = array_merge($jogadores, $dupla);
+        }
+    }
+    sort($jogadores);
+    Teste::igual([1, 2, 3, 4, 5, 6, 7, 8], $jogadores, "rodada {$numero} usa as 8 posicoes uma vez");
+    Teste::igual([1, 2, 3, 4, 5, 6, 7, 8], Rodizio::jogadoresDaRodada($numero), "jogadoresDaRodada({$numero}) devolve as 8 posicoes");
+}
+
+$duplas = Rodizio::todasAsDuplas();
+Teste::igual(28, count($duplas), 'gera 28 duplas');
+Teste::igual(28, count(array_unique($duplas)), 'as 28 duplas sao distintas');
+
+$contagem = [];
+foreach ($duplas as $dupla) {
+    [$a, $b] = array_map('intval', explode('-', $dupla));
+    $contagem[$a] = ($contagem[$a] ?? 0) + 1;
+    $contagem[$b] = ($contagem[$b] ?? 0) + 1;
+}
+foreach (range(1, 8) as $posicao) {
+    Teste::igual(7, $contagem[$posicao] ?? 0, "posicao {$posicao} e parceira exatamente 7 vezes");
+}
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_rodizio.php`
+Esperado: FALHA com `Failed opening required .../src/Rodizio.php`.
+
+- [ ] **Passo 3: escrever `src/Rodizio.php`**
+
+```php
+<?php
+
+/**
+ * Tabela fixa do rodizio Super 8.
+ *
+ * Cada rodada tem 2 partidas, uma por quadra. Cada partida tem duas duplas,
+ * identificadas pela posicao do jogador no sorteio (1 a 8).
+ * Ao longo das 7 rodadas cada posicao e parceira de cada outra exatamente uma vez.
+ */
+final class Rodizio
+{
+    public const RODADAS = [
+        1 => [[[1, 8], [2, 7]], [[3, 6], [4, 5]]],
+        2 => [[[2, 8], [1, 3]], [[4, 7], [5, 6]]],
+        3 => [[[3, 8], [2, 4]], [[1, 5], [6, 7]]],
+        4 => [[[4, 8], [3, 5]], [[2, 6], [1, 7]]],
+        5 => [[[5, 8], [4, 6]], [[3, 7], [1, 2]]],
+        6 => [[[6, 8], [5, 7]], [[1, 4], [2, 3]]],
+        7 => [[[7, 8], [1, 6]], [[2, 5], [3, 4]]],
+    ];
+
+    /** @return string[] as 28 duplas no formato "menor-maior" */
+    public static function todasAsDuplas(): array
+    {
+        $duplas = [];
+        foreach (self::RODADAS as $partidas) {
+            foreach ($partidas as $partida) {
+                foreach ($partida as $dupla) {
+                    $par = $dupla;
+                    sort($par);
+                    $duplas[] = $par[0] . '-' . $par[1];
+                }
+            }
+        }
+        return $duplas;
+    }
+
+    /** @return int[] as 8 posicoes que jogam na rodada, em ordem crescente */
+    public static function jogadoresDaRodada(int $numero): array
+    {
+        $jogadores = [];
+        foreach (self::RODADAS[$numero] as $partida) {
+            foreach ($partida as $dupla) {
+                $jogadores = array_merge($jogadores, $dupla);
+            }
+        }
+        sort($jogadores);
+        return $jogadores;
+    }
+}
+```
+
+- [ ] **Passo 4: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_rodizio.php`
+Esperado: PASSOU, com 0 falhas.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add src/Rodizio.php testes/teste_rodizio.php
+git commit -m "feat: tabela fixa do rodizio das 7 rodadas"
+```
+
+---
+
+## Tarefa 3: Sorteio reproduzivel por semente
+
+**Arquivos:**
+- Criar: `src/Sorteio.php`
+- Teste: `testes/teste_sorteio.php`
+
+**Interfaces:**
+- Produz: `Sorteio::gerarSemente(): int`, `Sorteio::ordenar(array $ids, int $semente): array`.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_sorteio.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../src/Sorteio.php';
+
+echo "Sorteio\n";
+
+$ids = [11, 22, 33, 44, 55, 66, 77, 88];
+
+$primeira = Sorteio::ordenar($ids, 12345);
+$segunda = Sorteio::ordenar($ids, 12345);
+Teste::igual($primeira, $segunda, 'mesma semente devolve sempre a mesma ordem');
+
+$outra = Sorteio::ordenar($ids, 999);
+Teste::verdade($primeira !== $outra, 'sementes diferentes devolvem ordens diferentes');
+
+$conferencia = $primeira;
+sort($conferencia);
+Teste::igual($ids, $conferencia, 'mantem exatamente os mesmos ids');
+Teste::igual(8, count($primeira), 'devolve 8 posicoes');
+
+Teste::verdade($ids !== $primeira, 'a ordem sorteada difere da ordem de entrada');
+
+$semente = Sorteio::gerarSemente();
+Teste::verdade($semente >= 1 && $semente <= 2147483647, 'a semente cabe em inteiro sem sinal de 32 bits');
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_sorteio.php`
+Esperado: FALHA com `Failed opening required .../src/Sorteio.php`.
+
+- [ ] **Passo 3: escrever `src/Sorteio.php`**
+
+```php
+<?php
+
+/**
+ * Embaralhamento reproduzivel.
+ *
+ * O sorteio grava a semente no campeonato. Rodando de novo com a mesma semente,
+ * a ordem sai identica, o que torna o chaveamento auditavel.
+ * O algoritmo e Fisher-Yates escrito na mao, e nao a funcao shuffle,
+ * para que o resultado nao dependa de detalhe interno de versao do PHP.
+ */
+final class Sorteio
+{
+    public static function gerarSemente(): int
+    {
+        return random_int(1, 2147483647);
+    }
+
+    /**
+     * @param int[] $ids
+     * @return int[] os mesmos ids em ordem sorteada
+     */
+    public static function ordenar(array $ids, int $semente): array
+    {
+        $ids = array_values($ids);
+        mt_srand($semente, MT_RAND_MT19937);
+
+        for ($i = count($ids) - 1; $i > 0; $i--) {
+            $j = mt_rand(0, $i);
+            $guarda = $ids[$i];
+            $ids[$i] = $ids[$j];
+            $ids[$j] = $guarda;
+        }
+
+        return $ids;
+    }
+}
+```
+
+- [ ] **Passo 4: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_sorteio.php`
+Esperado: PASSOU, com 0 falhas.
+
+Se `a ordem sorteada difere da ordem de entrada` falhar, a semente 12345 caiu num embaralhamento identidade. Trocar a semente do teste para 54321 e rodar de novo.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add src/Sorteio.php testes/teste_sorteio.php
+git commit -m "feat: sorteio reproduzivel por semente"
+```
+
+---
+
+## Tarefa 4: Banco de dados e conexao
+
+**Arquivos:**
+- Criar: `sql/schema.sql`
+- Criar: `config/config.exemplo.php`
+- Criar: `config/db.php`
+- Teste: `testes/teste_conexao.php`
+
+**Interfaces:**
+- Produz: funcao global `db(): PDO`. Todas as classes que falam com o banco recebem esse PDO por parametro, nunca chamam `db()` por dentro.
+
+- [ ] **Passo 1: escrever `sql/schema.sql`**
+
+```sql
+CREATE DATABASE IF NOT EXISTS super8
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+USE super8;
+
+CREATE TABLE IF NOT EXISTS users (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  google_id     VARCHAR(64)  NULL UNIQUE,
+  nome          VARCHAR(120) NOT NULL,
+  email         VARCHAR(160) NULL UNIQUE,
+  senha_hash    VARCHAR(255) NULL,
+  foto_url      VARCHAR(255) NULL,
+  e_organizador TINYINT(1)   NOT NULL DEFAULT 0,
+  ativo         TINYINT(1)   NOT NULL DEFAULT 1,
+  criado_em     DATETIME     NOT NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS tentativas_login (
+  email         VARCHAR(160) PRIMARY KEY,
+  tentativas    TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  bloqueado_ate DATETIME NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS campeonatos (
+  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  organizador_id INT UNSIGNED NOT NULL,
+  nome           VARCHAR(160) NOT NULL,
+  data_evento    DATE NOT NULL,
+  local          VARCHAR(160) NULL,
+  custo          DECIMAL(10,2) NULL,
+  descricao      TEXT NULL,
+  status         ENUM('rascunho','sorteado','em_andamento','encerrado') NOT NULL DEFAULT 'rascunho',
+  seed_sorteio   INT UNSIGNED NULL,
+  criado_em      DATETIME NOT NULL,
+  CONSTRAINT fk_camp_organizador FOREIGN KEY (organizador_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS inscricoes (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  campeonato_id   INT UNSIGNED NOT NULL,
+  jogador_id      INT UNSIGNED NULL,
+  nome_exibicao   VARCHAR(120) NOT NULL,
+  posicao_sorteio TINYINT UNSIGNED NULL,
+  CONSTRAINT fk_insc_camp FOREIGN KEY (campeonato_id) REFERENCES campeonatos(id),
+  CONSTRAINT fk_insc_jogador FOREIGN KEY (jogador_id) REFERENCES users(id),
+  UNIQUE KEY uk_camp_posicao (campeonato_id, posicao_sorteio),
+  UNIQUE KEY uk_camp_nome (campeonato_id, nome_exibicao),
+  UNIQUE KEY uk_camp_jogador (campeonato_id, jogador_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS rodadas (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  campeonato_id INT UNSIGNED NOT NULL,
+  numero        TINYINT UNSIGNED NOT NULL,
+  CONSTRAINT fk_rod_camp FOREIGN KEY (campeonato_id) REFERENCES campeonatos(id),
+  UNIQUE KEY uk_camp_numero (campeonato_id, numero)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS partidas (
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rodada_id    INT UNSIGNED NOT NULL,
+  quadra       TINYINT UNSIGNED NOT NULL,
+  dupla_a_j1   INT UNSIGNED NOT NULL,
+  dupla_a_j2   INT UNSIGNED NOT NULL,
+  dupla_b_j1   INT UNSIGNED NOT NULL,
+  dupla_b_j2   INT UNSIGNED NOT NULL,
+  games_a      TINYINT UNSIGNED NULL,
+  games_b      TINYINT UNSIGNED NULL,
+  encerrada    TINYINT(1) NOT NULL DEFAULT 0,
+  gravado_por  INT UNSIGNED NULL,
+  gravado_em   DATETIME NULL,
+  CONSTRAINT fk_part_rodada FOREIGN KEY (rodada_id) REFERENCES rodadas(id),
+  CONSTRAINT fk_part_a1 FOREIGN KEY (dupla_a_j1) REFERENCES inscricoes(id),
+  CONSTRAINT fk_part_a2 FOREIGN KEY (dupla_a_j2) REFERENCES inscricoes(id),
+  CONSTRAINT fk_part_b1 FOREIGN KEY (dupla_b_j1) REFERENCES inscricoes(id),
+  CONSTRAINT fk_part_b2 FOREIGN KEY (dupla_b_j2) REFERENCES inscricoes(id),
+  UNIQUE KEY uk_rodada_quadra (rodada_id, quadra)
+) ENGINE=InnoDB;
+```
+
+Nota sobre valor nulo em chave unica: no MySQL e no MariaDB, nulo nao colide. Isso faz duas coisas de proposito. Em `uk_camp_posicao`, permite que varias inscricoes fiquem com `posicao_sorteio` nula antes do sorteio. Em `uk_camp_jogador`, impede que a mesma conta seja inscrita duas vezes no mesmo campeonato, e ao mesmo tempo deixa entrar quantos convidados sem conta forem precisos, porque todos tem `jogador_id` nulo. Sem essa chave, um organizador que cadastre a mesma pessoa como "Joao" e "Joao S." faz o ranking contar um evento com 14 partidas e o dobro de games para ela, sem nada aparecer na tela.
+
+- [ ] **Passo 2: criar o banco**
+
+```bash
+"C:/xampp/mysql/bin/mysql.exe" -u root < /c/xampp/htdocs/super8/sql/schema.sql
+```
+
+Esperado: nenhuma saida, codigo 0. Ligar o MySQL no painel do XAMPP antes.
+
+- [ ] **Passo 3: escrever `config/config.exemplo.php`**
+
+```php
+<?php
+
+// Copiar este arquivo para config.php e ajustar. config.php fica fora do git.
+const DB_HOST  = '127.0.0.1';
+const DB_PORTA = 3306;
+const DB_NOME  = 'super8';
+const DB_USER  = 'root';
+const DB_SENHA = '';
+
+// Em producao, com HTTPS ativo, mudar para true.
+const COOKIE_SEGURO = false;
+```
+
+- [ ] **Passo 4: escrever `config/db.php`**
+
+```php
+<?php
+
+require_once __DIR__ . '/config.php';
+
+function db(): PDO
+{
+    static $pdo = null;
+
+    if ($pdo === null) {
+        $dsn = 'mysql:host=' . DB_HOST . ';port=' . DB_PORTA . ';dbname=' . DB_NOME . ';charset=utf8mb4';
+        $pdo = new PDO($dsn, DB_USER, DB_SENHA, [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES   => false,
+        ]);
+    }
+
+    return $pdo;
+}
+```
+
+`ATTR_EMULATE_PREPARES` em false faz o MySQL preparar de verdade, o que fecha a porta de injecao mesmo em caso de erro de tipo.
+
+- [ ] **Passo 5: escrever `testes/teste_conexao.php`**
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../config/db.php';
+
+echo "Conexao\n";
+
+$pdo = db();
+Teste::verdade($pdo instanceof PDO, 'db() devolve um PDO');
+Teste::verdade(db() === $pdo, 'db() reaproveita a mesma conexao');
+
+$tabelas = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+foreach (['users', 'tentativas_login', 'campeonatos', 'inscricoes', 'rodadas', 'partidas'] as $tabela) {
+    Teste::verdade(in_array($tabela, $tabelas, true), "a tabela {$tabela} existe");
+}
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 6: copiar a configuracao e rodar o teste**
+
+```bash
+cp /c/xampp/htdocs/super8/config/config.exemplo.php /c/xampp/htdocs/super8/config/config.php
+"C:/xampp/php/php.exe" /c/xampp/htdocs/super8/testes/teste_conexao.php
+```
+
+Esperado: PASSOU, com 0 falhas.
+
+- [ ] **Passo 7: commit**
+
+```bash
+git add sql/schema.sql config/config.exemplo.php config/db.php testes/teste_conexao.php
+git commit -m "feat: schema do banco e conexao PDO"
+```
+
+---
+
+## Tarefa 5: Sessao, CSRF e escape de saida
+
+**Arquivos:**
+- Criar: `config/sessao.php`
+- Criar: `config/csrf.php`
+- Teste: `testes/teste_csrf.php`
+
+**Interfaces:**
+- Produz: `iniciarSessao(): void`, `csrf_token(): string`, `csrf_campo(): string`, `csrf_conferir(): void`, `e(?string $texto): string`.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_csrf.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../config/csrf.php';
+
+// A sessao precisa comecar antes de qualquer saida. Se vier depois de um echo,
+// o PHP recusa iniciar, $_SESSION vira um array comum e as asserticoes de token
+// abaixo passam sem testar sessao nenhuma.
+session_start();
+
+echo "CSRF e escape\n";
+
+// Sem estas duas, as asserticoes de token abaixo passam mesmo com a sessao morta,
+// porque $_SESSION funciona como array comum quando o PHP recusa iniciar a sessao.
+Teste::igual(PHP_SESSION_ACTIVE, session_status(), 'a sessao esta ativa de verdade, nao e um array solto');
+Teste::verdade(session_id() !== '', 'a sessao tem identificador');
+
+Teste::igual('&lt;script&gt;', e('<script>'), 'escapa sinal de menor e maior');
+Teste::igual('&quot;aspas&quot;', e('"aspas"'), 'escapa aspas retas');
+Teste::igual('&#039;', e("'"), 'escapa apostrofo');
+Teste::igual('', e(null), 'nulo vira string vazia');
+Teste::igual('Joao &amp; Maria', e('Joao & Maria'), 'escapa e comercial');
+
+$token = csrf_token();
+Teste::igual(64, strlen($token), 'o token tem 64 caracteres');
+Teste::igual($token, csrf_token(), 'o token se mantem na mesma sessao');
+Teste::verdade(str_contains(csrf_campo(), $token), 'o campo escondido carrega o token');
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_csrf.php`
+Esperado: FALHA com `Failed opening required .../config/csrf.php`.
+
+- [ ] **Passo 3: escrever `config/csrf.php`**
+
+```php
+<?php
+
+function e(?string $texto): string
+{
+    return htmlspecialchars($texto ?? '', ENT_QUOTES, 'UTF-8');
+}
+
+function csrf_token(): string
+{
+    if (empty($_SESSION['csrf'])) {
+        $_SESSION['csrf'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf'];
+}
+
+function csrf_campo(): string
+{
+    return '<input type="hidden" name="csrf" value="' . e(csrf_token()) . '">';
+}
+
+function csrf_conferir(): void
+{
+    $enviado = $_POST['csrf'] ?? '';
+    if (!is_string($enviado) || !hash_equals(csrf_token(), $enviado)) {
+        http_response_code(403);
+        exit('Pedido invalido. Recarregue a pagina e tente de novo.');
+    }
+}
+```
+
+`hash_equals` compara em tempo constante, o que evita descobrir o token por medicao de tempo.
+
+- [ ] **Passo 4: escrever `config/sessao.php`**
+
+```php
+<?php
+
+require_once __DIR__ . '/config.php';
+
+function iniciarSessao(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        return;
+    }
+
+    // Sem isso o PHP aceita um identificador de sessao que ele nunca emitiu,
+    // que e o vetor classico de fixacao de sessao.
+    ini_set('session.use_strict_mode', '1');
+
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Strict',
+        'secure'   => COOKIE_SEGURO,
+    ]);
+
+    session_start();
+}
+```
+
+- [ ] **Passo 5: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_csrf.php`
+Esperado: PASSOU, com 0 falhas.
+
+- [ ] **Passo 6: commit**
+
+```bash
+git add config/sessao.php config/csrf.php testes/teste_csrf.php
+git commit -m "feat: sessao segura, token CSRF e escape de saida"
+```
+
+---
+
+## Tarefa 6: Cadastro, login e controle de acesso
+
+**Arquivos:**
+- Criar: `src/Auth.php`
+- Criar: `config/acesso.php`
+- Teste: `testes/teste_auth.php`
+
+**Interfaces:**
+- Consome: `db()` da tarefa 4 (chamada pelo ponto de entrada, nao por dentro da classe).
+- Produz em `src/Auth.php`: `Auth::cadastrar(PDO $pdo, string $nome, string $email, string $senha): int`, `Auth::autenticar(PDO $pdo, string $email, string $senha): ?array`, `Auth::registrarFalha(PDO $pdo, string $email): void`, `Auth::limparFalhas(PDO $pdo, string $email): void`, `Auth::bloqueadoAte(PDO $pdo, string $email): ?string`.
+- Produz em `config/acesso.php`: `usuarioLogado(): ?array`, `exigirLogin(PDO $pdo): array`, `exigirDonoDoCampeonato(PDO $pdo, int $campeonatoId): array`. `exigirLogin` rele o usuario no banco a cada requisicao e derruba a sessao se a conta estiver desativada, para que desativar uma conta corte o acesso de quem ja esta logado.
+- `cadastrar` lanca `InvalidArgumentException` para senha curta, e-mail invalido ou e-mail repetido.
+- `autenticar` devolve o registro do usuario ou nulo.
+
+**Por que a divisao em dois arquivos:** a restricao global proibe classes de `src/` de chamar `header`, `echo` ou tocar em `$_SESSION`, e a razao e poder testar `src/` por linha de comando. As cinco funcoes de `Auth` recebem PDO e valores por parametro, entao testam sozinhas. As tres de acesso leem sessao e redirecionam, que e trabalho de camada web. Elas moram em `config/`, junto de `sessao.php` e `csrf.php`, que ja fazem esse tipo de coisa.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_auth.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../config/db.php';
+require __DIR__ . '/../src/Auth.php';
+
+echo "Auth\n";
+
+$pdo = db();
+$pdo->beginTransaction();
+
+$email = 'teste' . random_int(1000, 9999) . '@exemplo.com';
+
+$id = Auth::cadastrar($pdo, 'Organizador Teste', $email, 'senhaforte123');
+Teste::verdade($id > 0, 'cadastrar devolve o id do usuario');
+
+$busca = $pdo->prepare('SELECT senha_hash, e_organizador FROM users WHERE id = ?');
+$busca->execute([$id]);
+$linha = $busca->fetch();
+Teste::verdade($linha['senha_hash'] !== 'senhaforte123', 'a senha nao fica em texto no banco');
+Teste::verdade(password_verify('senhaforte123', $linha['senha_hash']), 'o hash confere com a senha');
+Teste::igual(1, (int) $linha['e_organizador'], 'quem se cadastra vira organizador');
+
+$usuario = Auth::autenticar($pdo, $email, 'senhaforte123');
+Teste::verdade($usuario !== null, 'autentica com a senha certa');
+Teste::igual($id, (int) $usuario['id'], 'devolve o usuario correto');
+
+Teste::igual(null, Auth::autenticar($pdo, $email, 'senhaerrada'), 'recusa a senha errada');
+Teste::igual(null, Auth::autenticar($pdo, 'naoexiste@exemplo.com', 'qualquer'), 'recusa e-mail inexistente');
+
+$erro = null;
+try {
+    Auth::cadastrar($pdo, 'Curta', 'curta' . $email, '1234567');
+} catch (InvalidArgumentException $excecao) {
+    $erro = $excecao->getMessage();
+}
+Teste::verdade($erro !== null, 'recusa senha com menos de 8 caracteres');
+
+$erro = null;
+try {
+    Auth::cadastrar($pdo, 'Repetido', $email, 'senhaforte123');
+} catch (InvalidArgumentException $excecao) {
+    $erro = $excecao->getMessage();
+}
+Teste::verdade($erro !== null, 'recusa e-mail ja cadastrado');
+
+$erro = null;
+try {
+    Auth::cadastrar($pdo, 'Invalido', 'nao-e-email', 'senhaforte123');
+} catch (InvalidArgumentException $excecao) {
+    $erro = $excecao->getMessage();
+}
+Teste::verdade($erro !== null, 'recusa e-mail malformado');
+
+Teste::igual(null, Auth::bloqueadoAte($pdo, $email), 'comeca sem bloqueio');
+
+// O limite e 5. Quatro falhas ainda deixam entrar; a quinta bloqueia.
+// Sem essas duas asserticoes juntas, um erro de uma unidade a mais ou a menos passaria batido.
+for ($i = 0; $i < 4; $i++) {
+    Auth::registrarFalha($pdo, $email);
+}
+Teste::igual(null, Auth::bloqueadoAte($pdo, $email), 'quatro falhas ainda nao bloqueiam');
+
+Auth::registrarFalha($pdo, $email);
+Teste::verdade(Auth::bloqueadoAte($pdo, $email) !== null, 'a quinta falha bloqueia');
+
+Auth::limparFalhas($pdo, $email);
+Teste::igual(null, Auth::bloqueadoAte($pdo, $email), 'login certo limpa o bloqueio');
+
+$pdo->rollBack();
+
+exit(Teste::resumo());
+```
+
+O teste roda dentro de transacao e desfaz tudo no fim, entao nao suja o banco.
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_auth.php`
+Esperado: FALHA com `Failed opening required .../src/Auth.php`.
+
+- [ ] **Passo 3: escrever `src/Auth.php`**
+
+```php
+<?php
+
+final class Auth
+{
+    private const MAX_TENTATIVAS = 5;
+
+    public static function cadastrar(PDO $pdo, string $nome, string $email, string $senha): int
+    {
+        $nome = trim($nome);
+        $email = strtolower(trim($email));
+
+        if ($nome === '') {
+            throw new InvalidArgumentException('Informe o nome.');
+        }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('E-mail invalido.');
+        }
+        if (strlen($senha) < 8) {
+            throw new InvalidArgumentException('A senha precisa de pelo menos 8 caracteres.');
+        }
+
+        $busca = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+        $busca->execute([$email]);
+        if ($busca->fetch() !== false) {
+            throw new InvalidArgumentException('Ja existe conta com esse e-mail.');
+        }
+
+        $insere = $pdo->prepare(
+            'INSERT INTO users (nome, email, senha_hash, e_organizador, ativo, criado_em)
+             VALUES (?, ?, ?, 1, 1, NOW())'
+        );
+        $insere->execute([$nome, $email, password_hash($senha, PASSWORD_ARGON2ID)]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    public static function autenticar(PDO $pdo, string $email, string $senha): ?array
+    {
+        $email = strtolower(trim($email));
+
+        $busca = $pdo->prepare('SELECT * FROM users WHERE email = ? AND ativo = 1');
+        $busca->execute([$email]);
+        $usuario = $busca->fetch();
+
+        if ($usuario === false || $usuario['senha_hash'] === null) {
+            return null;
+        }
+        if (!password_verify($senha, $usuario['senha_hash'])) {
+            return null;
+        }
+
+        unset($usuario['senha_hash']);
+        return $usuario;
+    }
+
+    public static function registrarFalha(PDO $pdo, string $email): void
+    {
+        $email = strtolower(trim($email));
+
+        // Duas instrucoes de proposito. Num unico ON DUPLICATE KEY UPDATE, a segunda
+        // atribuicao ja enxerga o valor novo da primeira, e o calculo do bloqueio sairia
+        // adiantado em uma tentativa. Separado, cada passo le um estado sem ambiguidade.
+        $incrementa = $pdo->prepare(
+            'INSERT INTO tentativas_login (email, tentativas) VALUES (?, 1)
+             ON DUPLICATE KEY UPDATE tentativas = tentativas + 1'
+        );
+        $incrementa->execute([$email]);
+
+        // A espera comeca em 30 segundos na tentativa de numero MAX_TENTATIVAS
+        // e dobra a cada falha seguinte, ate o teto de 15 minutos.
+        $bloqueia = $pdo->prepare(
+            'UPDATE tentativas_login
+             SET bloqueado_ate = DATE_ADD(NOW(), INTERVAL LEAST(POW(2, tentativas - ?) * 30, 900) SECOND)
+             WHERE email = ? AND tentativas >= ?'
+        );
+        $bloqueia->execute([self::MAX_TENTATIVAS, $email, self::MAX_TENTATIVAS]);
+    }
+
+    public static function limparFalhas(PDO $pdo, string $email): void
+    {
+        $comando = $pdo->prepare('DELETE FROM tentativas_login WHERE email = ?');
+        $comando->execute([strtolower(trim($email))]);
+    }
+
+    /** Devolve a data e hora do fim do bloqueio, ou nulo se estiver liberado. */
+    public static function bloqueadoAte(PDO $pdo, string $email): ?string
+    {
+        $busca = $pdo->prepare('SELECT bloqueado_ate FROM tentativas_login WHERE email = ? AND bloqueado_ate > NOW()');
+        $busca->execute([strtolower(trim($email))]);
+        $linha = $busca->fetch();
+
+        return $linha === false ? null : $linha['bloqueado_ate'];
+    }
+
+}
+```
+
+- [ ] **Passo 3b: escrever `config/acesso.php`**
+
+```php
+<?php
+
+/**
+ * Controle de acesso da camada web.
+ *
+ * Fica em config/ e nao em src/ porque le sessao, escreve cabecalho e interrompe
+ * a pagina. As classes de src/ precisam continuar rodando por linha de comando.
+ */
+
+function usuarioLogado(): ?array
+{
+    $usuario = $_SESSION['usuario'] ?? null;
+
+    // Devolve nulo em vez de estourar TypeError se a sessao trouxer outra coisa.
+    return is_array($usuario) ? $usuario : null;
+}
+
+/**
+ * Interrompe a pagina e manda para o login se nao houver sessao valida.
+ *
+ * Rele o usuario no banco a cada requisicao de proposito. Sem isso, desativar
+ * uma conta nao corta o acesso de quem ja esta logado, e a rotina de exclusao
+ * a pedido do titular ficaria sem efeito pratico.
+ */
+function exigirLogin(PDO $pdo): array
+{
+    $sessao = usuarioLogado();
+
+    if ($sessao === null || !isset($sessao['id']) || (int) $sessao['id'] <= 0) {
+        header('Location: login.php');
+        exit;
+    }
+
+    $busca = $pdo->prepare(
+        'SELECT id, google_id, nome, email, foto_url, e_organizador, ativo, criado_em
+         FROM users WHERE id = ? AND ativo = 1'
+    );
+    $busca->execute([(int) $sessao['id']]);
+    $usuario = $busca->fetch();
+
+    if ($usuario === false) {
+        $_SESSION = [];
+        session_destroy();
+        header('Location: login.php');
+        exit;
+    }
+
+    return $usuario;
+}
+
+/** Confere que o campeonato existe e pertence a quem esta logado. */
+function exigirDonoDoCampeonato(PDO $pdo, int $campeonatoId): array
+{
+    $usuario = exigirLogin($pdo);
+
+    $busca = $pdo->prepare('SELECT * FROM campeonatos WHERE id = ? AND organizador_id = ?');
+    $busca->execute([$campeonatoId, (int) $usuario['id']]);
+    $campeonato = $busca->fetch();
+
+    if ($campeonato === false) {
+        http_response_code(404);
+        exit('Campeonato nao encontrado.');
+    }
+
+    return $campeonato;
+}
+```
+
+A resposta 404 para campeonato de outro organizador e proposital. Devolver 403 confirmaria que aquele id existe.
+
+- [ ] **Passo 4: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_auth.php`
+Esperado: PASSOU, com 0 falhas.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add src/Auth.php config/acesso.php testes/teste_auth.php
+git commit -m "feat: cadastro, login com argon2id e bloqueio por tentativa"
+```
+
+---
+
+## Tarefa 7: Campeonato, inscricoes, sorteio e chaveamento
+
+**Arquivos:**
+- Criar: `src/Campeonato.php`
+- Teste: `testes/teste_campeonato.php`
+
+**Interfaces:**
+- Consome: `Rodizio::RODADAS` (tarefa 2), `Sorteio::gerarSemente()` e `Sorteio::ordenar()` (tarefa 3).
+- Produz: `Campeonato::criar(PDO $pdo, int $organizadorId, array $dados): int`, `Campeonato::buscar(PDO $pdo, int $id): ?array`, `Campeonato::listarDoOrganizador(PDO $pdo, int $organizadorId): array`, `Campeonato::atualizar(PDO $pdo, int $id, array $dados): void`, `Campeonato::inscrever(PDO $pdo, int $campeonatoId, string $nomeExibicao, ?int $jogadorId): int`, `Campeonato::listarInscricoes(PDO $pdo, int $campeonatoId): array`, `Campeonato::removerInscricao(PDO $pdo, int $campeonatoId, int $inscricaoId): void`, `Campeonato::sortear(PDO $pdo, int $campeonatoId, ?int $semente = null): int`, `Campeonato::chaveamento(PDO $pdo, int $campeonatoId): array`, `Campeonato::temPlacarLancado(PDO $pdo, int $campeonatoId): bool`.
+- `$dados` de `criar` e `atualizar` tem as chaves `nome`, `data_evento`, `local`, `custo`, `descricao`.
+- `chaveamento` devolve array de 7 rodadas, cada uma com `numero` e `partidas`. Cada partida traz `id`, `quadra`, `numero`, `encerrada`, os nomes de exibicao em `a1`, `a2`, `b1`, `b2`, os ids das inscricoes em `dupla_a_j1`, `dupla_a_j2`, `dupla_b_j1`, `dupla_b_j2`, e `games_a`, `games_b`.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_campeonato.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../config/db.php';
+require __DIR__ . '/../src/Rodizio.php';
+require __DIR__ . '/../src/Sorteio.php';
+require __DIR__ . '/../src/Auth.php';
+require __DIR__ . '/../src/Campeonato.php';
+
+echo "Campeonato\n";
+
+$pdo = db();
+$pdo->beginTransaction();
+
+$organizadorId = Auth::cadastrar($pdo, 'Organizador', 'org' . random_int(1000, 9999) . '@exemplo.com', 'senhaforte123');
+
+$campeonatoId = Campeonato::criar($pdo, $organizadorId, [
+    'nome'        => 'Super 8 de teste',
+    'data_evento' => '2026-09-01',
+    'local'       => 'Arena Central',
+    'custo'       => 50.00,
+    'descricao'   => 'Evento de teste',
+]);
+Teste::verdade($campeonatoId > 0, 'criar devolve o id do campeonato');
+
+$campeonato = Campeonato::buscar($pdo, $campeonatoId);
+Teste::igual('rascunho', $campeonato['status'], 'nasce como rascunho');
+Teste::igual(null, $campeonato['seed_sorteio'], 'nasce sem semente');
+
+$erro = null;
+try {
+    Campeonato::sortear($pdo, $campeonatoId);
+} catch (RuntimeException $excecao) {
+    $erro = $excecao->getMessage();
+}
+Teste::verdade($erro !== null, 'recusa sortear sem os 8 inscritos');
+
+foreach (range(1, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoId, "Jogador {$numero}", null);
+}
+Teste::igual(8, count(Campeonato::listarInscricoes($pdo, $campeonatoId)), 'tem 8 inscritos');
+
+$erro = null;
+try {
+    Campeonato::inscrever($pdo, $campeonatoId, 'Jogador 9', null);
+} catch (RuntimeException $excecao) {
+    $erro = $excecao->getMessage();
+}
+Teste::verdade($erro !== null, 'recusa o nono inscrito');
+
+$semente = Campeonato::sortear($pdo, $campeonatoId, 4242);
+Teste::igual(4242, $semente, 'grava a semente informada');
+
+$campeonato = Campeonato::buscar($pdo, $campeonatoId);
+Teste::igual('sorteado', $campeonato['status'], 'muda o status para sorteado');
+Teste::igual(4242, (int) $campeonato['seed_sorteio'], 'a semente fica no campeonato');
+
+$posicoes = array_map(
+    static fn (array $inscricao): int => (int) $inscricao['posicao_sorteio'],
+    Campeonato::listarInscricoes($pdo, $campeonatoId)
+);
+sort($posicoes);
+Teste::igual([1, 2, 3, 4, 5, 6, 7, 8], $posicoes, 'as 8 posicoes foram distribuidas');
+
+$chaveamento = Campeonato::chaveamento($pdo, $campeonatoId);
+Teste::igual(7, count($chaveamento), 'gera 7 rodadas');
+foreach ($chaveamento as $rodada) {
+    Teste::igual(2, count($rodada['partidas']), "a rodada {$rodada['numero']} tem 2 partidas");
+}
+
+$contaPartidas = $pdo->prepare(
+    'SELECT COUNT(*) FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+
+$contaPartidas->execute([$campeonatoId]);
+Teste::igual(14, (int) $contaPartidas->fetchColumn(), 'gera 14 partidas');
+
+Teste::verdade(!Campeonato::temPlacarLancado($pdo, $campeonatoId), 'ainda nao tem placar lancado');
+
+Campeonato::sortear($pdo, $campeonatoId, 4242);
+
+$contaPartidas->execute([$campeonatoId]);
+Teste::igual(14, (int) $contaPartidas->fetchColumn(), 'refazer o sorteio nao duplica partidas');
+
+$pdo->rollBack();
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_campeonato.php`
+Esperado: FALHA com `Failed opening required .../src/Campeonato.php`.
+
+- [ ] **Passo 3: escrever `src/Campeonato.php`**
+
+```php
+<?php
+
+final class Campeonato
+{
+    public static function criar(PDO $pdo, int $organizadorId, array $dados): int
+    {
+        // A coluna status ja tem DEFAULT 'rascunho' no schema, entao fica fora do INSERT.
+        $comando = $pdo->prepare(
+            'INSERT INTO campeonatos (organizador_id, nome, data_evento, local, custo, descricao, criado_em)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())'
+        );
+        $comando->execute([
+            $organizadorId,
+            trim($dados['nome']),
+            $dados['data_evento'],
+            $dados['local'] ?? null,
+            $dados['custo'] !== '' ? $dados['custo'] : null,
+            $dados['descricao'] ?? null,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    public static function buscar(PDO $pdo, int $id): ?array
+    {
+        $busca = $pdo->prepare('SELECT * FROM campeonatos WHERE id = ?');
+        $busca->execute([$id]);
+        $linha = $busca->fetch();
+
+        return $linha === false ? null : $linha;
+    }
+
+    public static function listarDoOrganizador(PDO $pdo, int $organizadorId): array
+    {
+        $busca = $pdo->prepare('SELECT * FROM campeonatos WHERE organizador_id = ? ORDER BY data_evento DESC, id DESC');
+        $busca->execute([$organizadorId]);
+
+        return $busca->fetchAll();
+    }
+
+    public static function atualizar(PDO $pdo, int $id, array $dados): void
+    {
+        $comando = $pdo->prepare(
+            'UPDATE campeonatos SET nome = ?, data_evento = ?, local = ?, custo = ?, descricao = ? WHERE id = ?'
+        );
+        $comando->execute([
+            trim($dados['nome']),
+            $dados['data_evento'],
+            $dados['local'] ?? null,
+            $dados['custo'] !== '' ? $dados['custo'] : null,
+            $dados['descricao'] ?? null,
+            $id,
+        ]);
+    }
+
+    public static function inscrever(PDO $pdo, int $campeonatoId, string $nomeExibicao, ?int $jogadorId): int
+    {
+        $nomeExibicao = trim($nomeExibicao);
+        if ($nomeExibicao === '') {
+            throw new InvalidArgumentException('Informe o nome do competidor.');
+        }
+
+        if (count(self::listarInscricoes($pdo, $campeonatoId)) >= 8) {
+            throw new RuntimeException('O campeonato ja tem 8 competidores.');
+        }
+
+        $comando = $pdo->prepare(
+            'INSERT INTO inscricoes (campeonato_id, jogador_id, nome_exibicao) VALUES (?, ?, ?)'
+        );
+        $comando->execute([$campeonatoId, $jogadorId, $nomeExibicao]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    public static function listarInscricoes(PDO $pdo, int $campeonatoId): array
+    {
+        $busca = $pdo->prepare(
+            'SELECT * FROM inscricoes WHERE campeonato_id = ? ORDER BY posicao_sorteio IS NULL, posicao_sorteio, id'
+        );
+        $busca->execute([$campeonatoId]);
+
+        return $busca->fetchAll();
+    }
+
+    public static function removerInscricao(PDO $pdo, int $inscricaoId): void
+    {
+        $comando = $pdo->prepare('DELETE FROM inscricoes WHERE id = ?');
+        $comando->execute([$inscricaoId]);
+    }
+
+    public static function temPlacarLancado(PDO $pdo, int $campeonatoId): bool
+    {
+        $busca = $pdo->prepare(
+            'SELECT COUNT(*) FROM partidas p
+             JOIN rodadas r ON r.id = p.rodada_id
+             WHERE r.campeonato_id = ? AND p.encerrada = 1'
+        );
+        $busca->execute([$campeonatoId]);
+
+        return (int) $busca->fetchColumn() > 0;
+    }
+
+    /**
+     * Sorteia as posicoes, grava a semente e gera as 7 rodadas com as 14 partidas.
+     * Devolve a semente usada.
+     */
+    public static function sortear(PDO $pdo, int $campeonatoId, ?int $semente = null): int
+    {
+        $inscricoes = self::listarInscricoes($pdo, $campeonatoId);
+        if (count($inscricoes) !== 8) {
+            throw new RuntimeException('O sorteio precisa de exatamente 8 competidores.');
+        }
+        if (self::temPlacarLancado($pdo, $campeonatoId)) {
+            throw new RuntimeException('Nao da para refazer o sorteio com placar ja lancado.');
+        }
+
+        $semente = $semente ?? Sorteio::gerarSemente();
+        $ids = array_map(static fn (array $inscricao): int => (int) $inscricao['id'], $inscricoes);
+
+        // A ordem de entrada precisa depender so dos ids, nunca da posicao atual.
+        // listarInscricoes ordena por posicao_sorteio, que muda depois do primeiro sorteio.
+        // Sem este sort, refazer o sorteio com a mesma semente daria outro chaveamento
+        // e a promessa de auditoria pela semente cairia por terra.
+        sort($ids);
+
+        $ordenados = Sorteio::ordenar($ids, $semente);
+
+        $pdo->beginTransaction();
+        try {
+            $apagaPartidas = $pdo->prepare(
+                'DELETE p FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+            );
+            $apagaPartidas->execute([$campeonatoId]);
+
+            $apagaRodadas = $pdo->prepare('DELETE FROM rodadas WHERE campeonato_id = ?');
+            $apagaRodadas->execute([$campeonatoId]);
+
+            $limpaPosicao = $pdo->prepare('UPDATE inscricoes SET posicao_sorteio = NULL WHERE campeonato_id = ?');
+            $limpaPosicao->execute([$campeonatoId]);
+
+            $gravaPosicao = $pdo->prepare('UPDATE inscricoes SET posicao_sorteio = ? WHERE id = ?');
+            $porPosicao = [];
+            foreach ($ordenados as $indice => $inscricaoId) {
+                $posicao = $indice + 1;
+                $gravaPosicao->execute([$posicao, $inscricaoId]);
+                $porPosicao[$posicao] = $inscricaoId;
+            }
+
+            $criaRodada = $pdo->prepare('INSERT INTO rodadas (campeonato_id, numero) VALUES (?, ?)');
+            $criaPartida = $pdo->prepare(
+                'INSERT INTO partidas (rodada_id, quadra, dupla_a_j1, dupla_a_j2, dupla_b_j1, dupla_b_j2)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+
+            foreach (Rodizio::RODADAS as $numero => $partidas) {
+                $criaRodada->execute([$campeonatoId, $numero]);
+                $rodadaId = (int) $pdo->lastInsertId();
+
+                foreach ($partidas as $indice => $partida) {
+                    [$duplaA, $duplaB] = $partida;
+                    $criaPartida->execute([
+                        $rodadaId,
+                        $indice + 1,
+                        $porPosicao[$duplaA[0]],
+                        $porPosicao[$duplaA[1]],
+                        $porPosicao[$duplaB[0]],
+                        $porPosicao[$duplaB[1]],
+                    ]);
+                }
+            }
+
+            $gravaSemente = $pdo->prepare(
+                "UPDATE campeonatos SET seed_sorteio = ?, status = 'sorteado' WHERE id = ?"
+            );
+            $gravaSemente->execute([$semente, $campeonatoId]);
+
+            $pdo->commit();
+        } catch (Throwable $erro) {
+            $pdo->rollBack();
+            throw $erro;
+        }
+
+        return $semente;
+    }
+
+    /** Monta as 7 rodadas com nomes de exibicao para a tela. */
+    public static function chaveamento(PDO $pdo, int $campeonatoId): array
+    {
+        $busca = $pdo->prepare(
+            'SELECT r.numero, p.id, p.quadra, p.games_a, p.games_b, p.encerrada,
+                    a1.nome_exibicao AS a1, a2.nome_exibicao AS a2,
+                    b1.nome_exibicao AS b1, b2.nome_exibicao AS b2,
+                    p.dupla_a_j1, p.dupla_a_j2, p.dupla_b_j1, p.dupla_b_j2
+             FROM partidas p
+             JOIN rodadas r ON r.id = p.rodada_id
+             JOIN inscricoes a1 ON a1.id = p.dupla_a_j1
+             JOIN inscricoes a2 ON a2.id = p.dupla_a_j2
+             JOIN inscricoes b1 ON b1.id = p.dupla_b_j1
+             JOIN inscricoes b2 ON b2.id = p.dupla_b_j2
+             WHERE r.campeonato_id = ?
+             ORDER BY r.numero, p.quadra'
+        );
+        $busca->execute([$campeonatoId]);
+
+        $rodadas = [];
+        foreach ($busca->fetchAll() as $linha) {
+            $numero = (int) $linha['numero'];
+            if (!isset($rodadas[$numero])) {
+                $rodadas[$numero] = ['numero' => $numero, 'partidas' => []];
+            }
+            $rodadas[$numero]['partidas'][] = $linha;
+        }
+
+        return array_values($rodadas);
+    }
+}
+```
+
+- [ ] **Passo 4: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_campeonato.php`
+Esperado: PASSOU, com 0 falhas.
+
+Atencao: `sortear` abre a propria transacao. O teste tambem abre uma. O MySQL nao aninha transacao, entao o `beginTransaction` de dentro dispara erro. Se isso acontecer, trocar as chamadas de transacao de `sortear` por um controle que so abre transacao quando `$pdo->inTransaction()` for falso, assim:
+
+```php
+$transacaoPropria = !$pdo->inTransaction();
+if ($transacaoPropria) {
+    $pdo->beginTransaction();
+}
+// ... corpo ...
+if ($transacaoPropria) {
+    $pdo->commit();
+}
+```
+
+E no `catch`, `if ($transacaoPropria) { $pdo->rollBack(); }` antes de relancar.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add src/Campeonato.php testes/teste_campeonato.php
+git commit -m "feat: campeonato, inscricoes, sorteio com semente e chaveamento"
+```
+
+---
+
+## Tarefa 8: Placar e classificacao do evento
+
+**Arquivos:**
+- Criar: `src/Placar.php`
+- Teste: `testes/teste_placar.php`
+
+**Interfaces:**
+- Produz: `Placar::gravar(PDO $pdo, int $campeonatoId, int $partidaId, int $gamesA, int $gamesB, int $usuarioId): void`. Recebe o id do campeonato de proposito: trava a linha do campeonato primeiro, na mesma ordem das outras classes, e so entao confirma que a partida pertence a ele. Resolver o campeonato a partir da partida obrigaria a travar a partida antes, invertendo a ordem e criando deadlock com o sorteio., `Placar::classificacao(PDO $pdo, int $campeonatoId): array`, `Placar::classificarLinhas(array $inscricoes, array $partidas): array`.
+- `classificarLinhas` e funcao pura, sem banco. Recebe inscricoes com `id` e `nome_exibicao`, e partidas com `dupla_a_j1`, `dupla_a_j2`, `dupla_b_j1`, `dupla_b_j2`, `games_a`, `games_b`, `encerrada`. Devolve linhas ordenadas com `inscricao_id`, `nome`, `games`, `sofridos`, `saldo`, `vitorias`, `jogadas`, `empatado`.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_placar.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../src/Placar.php';
+
+echo "Placar\n";
+
+$inscricoes = [];
+foreach (range(1, 4) as $numero) {
+    $inscricoes[] = ['id' => 100 + $numero, 'nome_exibicao' => "Jogador {$numero}"];
+}
+
+$umaPartida = [[
+    'dupla_a_j1' => 101, 'dupla_a_j2' => 102,
+    'dupla_b_j1' => 103, 'dupla_b_j2' => 104,
+    'games_a' => 6, 'games_b' => 4, 'encerrada' => 1,
+]];
+
+$linhas = Placar::classificarLinhas($inscricoes, $umaPartida);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+Teste::igual(6, $porId[101]['games'], 'a dupla vencedora soma 6 games para cada jogador');
+Teste::igual(6, $porId[102]['games'], 'o parceiro soma os mesmos games');
+Teste::igual(4, $porId[101]['sofridos'], 'registra os games sofridos');
+Teste::igual(2, $porId[101]['saldo'], 'calcula o saldo');
+Teste::igual(1, $porId[101]['vitorias'], 'conta a vitoria');
+Teste::igual(4, $porId[103]['games'], 'a dupla perdedora soma os games que fez');
+Teste::igual(0, $porId[103]['vitorias'], 'quem perdeu nao soma vitoria');
+Teste::igual(1, $porId[101]['jogadas'], 'conta a partida disputada');
+
+Teste::igual(101, $linhas[0]['inscricao_id'], 'quem tem mais games fica em primeiro');
+
+$naoEncerrada = [[
+    'dupla_a_j1' => 101, 'dupla_a_j2' => 102,
+    'dupla_b_j1' => 103, 'dupla_b_j2' => 104,
+    'games_a' => null, 'games_b' => null, 'encerrada' => 0,
+]];
+$linhas = Placar::classificarLinhas($inscricoes, $naoEncerrada);
+Teste::igual(0, $linhas[0]['games'], 'partida sem placar nao entra na soma');
+Teste::igual(0, $linhas[0]['jogadas'], 'partida sem placar nao conta como disputada');
+
+// Desempate por saldo: dois pares com 6 games cada, saldos diferentes.
+// As partidas nao precisam formar um Super 8 valido. A funcao e pura e so soma o que recebe.
+$oito = [];
+foreach (range(1, 8) as $numero) {
+    $oito[] = ['id' => 100 + $numero, 'nome_exibicao' => "Jogador {$numero}"];
+}
+
+$porSaldo = [
+    [
+        'dupla_a_j1' => 101, 'dupla_a_j2' => 102,
+        'dupla_b_j1' => 103, 'dupla_b_j2' => 104,
+        'games_a' => 6, 'games_b' => 2, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 105, 'dupla_a_j2' => 106,
+        'dupla_b_j1' => 107, 'dupla_b_j2' => 108,
+        'games_a' => 6, 'games_b' => 5, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($oito, $porSaldo);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+Teste::igual(6, $porId[101]['games'], 'jogador 101 soma 6 games');
+Teste::igual(6, $porId[105]['games'], 'jogador 105 soma os mesmos 6 games');
+Teste::igual(4, $porId[101]['saldo'], 'jogador 101 fica com saldo 4');
+Teste::igual(1, $porId[105]['saldo'], 'jogador 105 fica com saldo 1');
+Teste::igual(101, $linhas[0]['inscricao_id'], 'com games iguais, o melhor saldo fica na frente');
+Teste::igual(105, $linhas[2]['inscricao_id'], 'o par de saldo menor vem depois');
+
+// Desempate por confronto direto: 101 e 103 empatam em games, saldo e vitorias,
+// e 101 fez mais games contra 103 no confronto entre eles.
+$dez = [];
+foreach (range(1, 10) as $numero) {
+    $dez[] = ['id' => 100 + $numero, 'nome_exibicao' => sprintf('Jogador %02d', $numero)];
+}
+
+$porConfronto = [
+    [
+        'dupla_a_j1' => 101, 'dupla_a_j2' => 102,
+        'dupla_b_j1' => 103, 'dupla_b_j2' => 104,
+        'games_a' => 6, 'games_b' => 3, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 101, 'dupla_a_j2' => 105,
+        'dupla_b_j1' => 106, 'dupla_b_j2' => 107,
+        'games_a' => 3, 'games_b' => 6, 'encerrada' => 1,
+    ],
+    [
+        'dupla_a_j1' => 103, 'dupla_a_j2' => 108,
+        'dupla_b_j1' => 109, 'dupla_b_j2' => 110,
+        'games_a' => 6, 'games_b' => 3, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($dez, $porConfronto);
+$porId = array_column($linhas, null, 'inscricao_id');
+
+Teste::igual(9, $porId[101]['games'], 'jogador 101 soma 9 games');
+Teste::igual(9, $porId[103]['games'], 'jogador 103 soma os mesmos 9 games');
+Teste::igual(0, $porId[101]['saldo'], 'jogador 101 fica com saldo zero');
+Teste::igual(0, $porId[103]['saldo'], 'jogador 103 fica com saldo zero');
+Teste::igual(1, $porId[101]['vitorias'], 'jogador 101 tem 1 vitoria');
+Teste::igual(1, $porId[103]['vitorias'], 'jogador 103 tem 1 vitoria');
+Teste::igual(101, $linhas[0]['inscricao_id'], 'o confronto direto coloca 101 na frente');
+Teste::igual(103, $linhas[1]['inscricao_id'], 'e 103 logo atras');
+Teste::verdade(!$linhas[0]['empatado'], 'quem vence o confronto direto nao fica marcado como empate');
+
+// Empate total fica sinalizado.
+$espelho = [
+    [
+        'dupla_a_j1' => 101, 'dupla_a_j2' => 102,
+        'dupla_b_j1' => 103, 'dupla_b_j2' => 104,
+        'games_a' => 6, 'games_b' => 6, 'encerrada' => 1,
+    ],
+];
+$linhas = Placar::classificarLinhas($inscricoes, $espelho);
+Teste::verdade($linhas[0]['empatado'], 'empate total fica sinalizado na linha');
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_placar.php`
+Esperado: FALHA com `Failed opening required .../src/Placar.php`.
+
+- [ ] **Passo 3: escrever `src/Placar.php`**
+
+```php
+<?php
+
+final class Placar
+{
+    public static function gravar(PDO $pdo, int $partidaId, int $gamesA, int $gamesB, int $usuarioId): void
+    {
+        if ($gamesA < 0 || $gamesA > 99 || $gamesB < 0 || $gamesB > 99) {
+            throw new InvalidArgumentException('Os games precisam ficar entre 0 e 99.');
+        }
+
+        $comando = $pdo->prepare(
+            'UPDATE partidas SET games_a = ?, games_b = ?, encerrada = 1, gravado_por = ?, gravado_em = NOW()
+             WHERE id = ?'
+        );
+        $comando->execute([$gamesA, $gamesB, $usuarioId, $partidaId]);
+    }
+
+    public static function classificacao(PDO $pdo, int $campeonatoId): array
+    {
+        $buscaInscricoes = $pdo->prepare('SELECT id, nome_exibicao FROM inscricoes WHERE campeonato_id = ?');
+        $buscaInscricoes->execute([$campeonatoId]);
+
+        $buscaPartidas = $pdo->prepare(
+            'SELECT p.dupla_a_j1, p.dupla_a_j2, p.dupla_b_j1, p.dupla_b_j2, p.games_a, p.games_b, p.encerrada
+             FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
+             WHERE r.campeonato_id = ?'
+        );
+        $buscaPartidas->execute([$campeonatoId]);
+
+        return self::classificarLinhas($buscaInscricoes->fetchAll(), $buscaPartidas->fetchAll());
+    }
+
+    /**
+     * Soma os games de cada jogador e ordena a classificacao.
+     * Funcao pura, sem banco, para poder ser testada por linha de comando.
+     *
+     * Ordem: games ganhos, saldo, vitorias, confronto direto, nome.
+     */
+    public static function classificarLinhas(array $inscricoes, array $partidas): array
+    {
+        $linhas = [];
+        foreach ($inscricoes as $inscricao) {
+            $id = (int) $inscricao['id'];
+            $linhas[$id] = [
+                'inscricao_id' => $id,
+                'nome'         => $inscricao['nome_exibicao'],
+                'games'        => 0,
+                'sofridos'     => 0,
+                'saldo'        => 0,
+                'vitorias'     => 0,
+                'jogadas'      => 0,
+                'empatado'     => false,
+            ];
+        }
+
+        // Games que cada jogador fez contra cada adversario, para o confronto direto.
+        $confronto = [];
+
+        foreach ($partidas as $partida) {
+            if ((int) $partida['encerrada'] !== 1 || $partida['games_a'] === null || $partida['games_b'] === null) {
+                continue;
+            }
+
+            $gamesA = (int) $partida['games_a'];
+            $gamesB = (int) $partida['games_b'];
+            $duplaA = [(int) $partida['dupla_a_j1'], (int) $partida['dupla_a_j2']];
+            $duplaB = [(int) $partida['dupla_b_j1'], (int) $partida['dupla_b_j2']];
+
+            foreach ([[$duplaA, $gamesA, $gamesB, $duplaB], [$duplaB, $gamesB, $gamesA, $duplaA]] as $lado) {
+                [$dupla, $feitos, $tomados, $adversarios] = $lado;
+                foreach ($dupla as $jogador) {
+                    if (!isset($linhas[$jogador])) {
+                        continue;
+                    }
+                    $linhas[$jogador]['games'] += $feitos;
+                    $linhas[$jogador]['sofridos'] += $tomados;
+                    $linhas[$jogador]['jogadas']++;
+                    if ($feitos > $tomados) {
+                        $linhas[$jogador]['vitorias']++;
+                    }
+                    foreach ($adversarios as $adversario) {
+                        $confronto[$jogador][$adversario] = ($confronto[$jogador][$adversario] ?? 0) + $feitos;
+                    }
+                }
+            }
+        }
+
+        foreach ($linhas as $id => $linha) {
+            $linhas[$id]['saldo'] = $linha['games'] - $linha['sofridos'];
+        }
+
+        $linhas = array_values($linhas);
+
+        usort($linhas, static function (array $um, array $outro) use ($confronto): int {
+            $comparacao = $outro['games'] <=> $um['games'];
+            if ($comparacao !== 0) {
+                return $comparacao;
+            }
+
+            $comparacao = $outro['saldo'] <=> $um['saldo'];
+            if ($comparacao !== 0) {
+                return $comparacao;
+            }
+
+            $comparacao = $outro['vitorias'] <=> $um['vitorias'];
+            if ($comparacao !== 0) {
+                return $comparacao;
+            }
+
+            $doUm = $confronto[$um['inscricao_id']][$outro['inscricao_id']] ?? 0;
+            $doOutro = $confronto[$outro['inscricao_id']][$um['inscricao_id']] ?? 0;
+            $comparacao = $doOutro <=> $doUm;
+            if ($comparacao !== 0) {
+                return $comparacao;
+            }
+
+            return strcmp($um['nome'], $outro['nome']);
+        });
+
+        // Marca quem empatou em tudo, inclusive no confronto direto.
+        $total = count($linhas);
+        for ($i = 0; $i < $total; $i++) {
+            for ($j = $i + 1; $j < $total; $j++) {
+                $mesmaConta = $linhas[$i]['games'] === $linhas[$j]['games']
+                    && $linhas[$i]['saldo'] === $linhas[$j]['saldo']
+                    && $linhas[$i]['vitorias'] === $linhas[$j]['vitorias'];
+
+                $doUm = $confronto[$linhas[$i]['inscricao_id']][$linhas[$j]['inscricao_id']] ?? 0;
+                $doOutro = $confronto[$linhas[$j]['inscricao_id']][$linhas[$i]['inscricao_id']] ?? 0;
+
+                if ($mesmaConta && $doUm === $doOutro) {
+                    $linhas[$i]['empatado'] = true;
+                    $linhas[$j]['empatado'] = true;
+                }
+            }
+        }
+
+        return $linhas;
+    }
+}
+```
+
+Nota sobre o confronto direto: quando tres ou mais jogadores empatam, a comparacao dois a dois pode nao ser transitiva. Se A vence B, B vence C e C vence A, nenhum par esta empatado mas tambem nao existe ordem correta.
+
+Por isso a marcacao de empate e por grupo, nao por par. Jogadores iguais em games, saldo e vitorias formam um grupo. Dentro do grupo, conta-se quantos companheiros de grupo cada um venceu no confronto direto. Contagens todas diferentes significam que o confronto direto ordenou o grupo, e a classificacao segue. Qualquer repeticao, por empate entre dois ou por ciclo entre tres, marca o grupo inteiro como empatado.
+
+Marcar so o par empatado, que foi a primeira versao deste plano, deixa passar exatamente o caso ciclico que motivou a coluna existir, e a tela acaba inventando uma ordem tirada da sequencia em que o banco devolveu as linhas.
+
+A consulta de inscricoes em `classificacao` leva `ORDER BY id` pelo mesmo motivo: sem ela, nem a ordem de entrada e estavel entre chamadas.
+
+- [ ] **Passo 4: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_placar.php`
+Esperado: PASSOU, com 0 falhas.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add src/Placar.php testes/teste_placar.php
+git commit -m "feat: gravacao de placar e classificacao com criterios de desempate"
+```
+
+---
+
+## Tarefa 9: Ranking acumulado por periodo
+
+**Arquivos:**
+- Criar: `src/Ranking.php`
+- Teste: `testes/teste_ranking.php`
+
+**Interfaces:**
+- Produz: `Ranking::acumulado(PDO $pdo, ?string $de, ?string $ate): array`. As datas vem no formato `AAAA-MM-DD` ou nulas; qualquer coisa fora desse formato e tratada como sem filtro. Devolve linhas com `jogador_id`, `nome`, `eventos`, `jogadas`, `games`, `sofridos`, `saldo`, `media`, ordenadas por games decrescente e nome crescente.
+- Somente jogadores com `jogador_id` preenchido entram. Convidado sem conta fica de fora, porque nao da para identificar a mesma pessoa entre eventos.
+- Somente campeonatos com status `encerrado` entram.
+
+- [ ] **Passo 1: escrever o teste que falha**
+
+Arquivo `testes/teste_ranking.php`:
+
+```php
+<?php
+
+require __DIR__ . '/asserta.php';
+require __DIR__ . '/../config/db.php';
+require __DIR__ . '/../src/Rodizio.php';
+require __DIR__ . '/../src/Sorteio.php';
+require __DIR__ . '/../src/Auth.php';
+require __DIR__ . '/../src/Campeonato.php';
+require __DIR__ . '/../src/Placar.php';
+require __DIR__ . '/../src/Ranking.php';
+
+echo "Ranking\n";
+
+$pdo = db();
+$pdo->beginTransaction();
+
+$sufixo = random_int(1000, 9999);
+$organizadorId = Auth::cadastrar($pdo, 'Organizador', "orgrank{$sufixo}@exemplo.com", 'senhaforte123');
+
+$jogadorId = Auth::cadastrar($pdo, 'Jogador Com Conta', "jog{$sufixo}@exemplo.com", 'senhaforte123');
+
+$campeonatoId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Etapa 1', 'data_evento' => '2026-05-10',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+
+Campeonato::inscrever($pdo, $campeonatoId, 'Jogador Com Conta', $jogadorId);
+foreach (range(2, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoId, "Convidado {$numero}", null);
+}
+
+Campeonato::sortear($pdo, $campeonatoId, 777);
+
+$buscaPartidas = $pdo->prepare(
+    'SELECT p.id FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?'
+);
+$buscaPartidas->execute([$campeonatoId]);
+$partidas = $buscaPartidas->fetchAll(PDO::FETCH_COLUMN);
+
+foreach ($partidas as $partidaId) {
+    Placar::gravar($pdo, $campeonatoId, (int) $partidaId, 6, 3, $organizadorId);
+}
+
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$campeonatoId]);
+
+$linhas = Ranking::acumulado($pdo, null, null);
+$nossa = null;
+foreach ($linhas as $linha) {
+    if ((int) $linha['jogador_id'] === $jogadorId) {
+        $nossa = $linha;
+    }
+}
+
+Teste::verdade($nossa !== null, 'o jogador com conta aparece no ranking');
+Teste::igual(1, (int) $nossa['eventos'], 'conta 1 evento disputado');
+Teste::igual(7, (int) $nossa['jogadas'], 'conta as 7 partidas do Super 8');
+Teste::verdade((int) $nossa['games'] > 0, 'soma os games do evento');
+
+$foraDoPeriodo = Ranking::acumulado($pdo, '2026-06-01', '2026-06-30');
+$achou = false;
+foreach ($foraDoPeriodo as $linha) {
+    if ((int) $linha['jogador_id'] === $jogadorId) {
+        $achou = true;
+    }
+}
+Teste::verdade(!$achou, 'o filtro de periodo exclui evento de fora da janela');
+
+$pdo->rollBack();
+
+exit(Teste::resumo());
+```
+
+- [ ] **Passo 2: rodar o teste e confirmar que falha**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_ranking.php`
+Esperado: FALHA com `Failed opening required .../src/Ranking.php`.
+
+- [ ] **Passo 3: escrever `src/Ranking.php`**
+
+```php
+<?php
+
+final class Ranking
+{
+    /**
+     * Soma o desempenho de cada jogador com conta entre campeonatos encerrados.
+     * As datas vem no formato AAAA-MM-DD ou nulas para nao filtrar.
+     */
+    public static function acumulado(PDO $pdo, ?string $de, ?string $ate): array
+    {
+        $condicoes = ["c.status = 'encerrado'", 'i.jogador_id IS NOT NULL', 'p.encerrada = 1'];
+        $valores = [];
+
+        if ($de !== null && $de !== '') {
+            $condicoes[] = 'c.data_evento >= ?';
+            $valores[] = $de;
+        }
+        if ($ate !== null && $ate !== '') {
+            $condicoes[] = 'c.data_evento <= ?';
+            $valores[] = $ate;
+        }
+
+        $onde = implode(' AND ', $condicoes);
+
+        $sql = "
+            SELECT u.id AS jogador_id,
+                   u.nome,
+                   COUNT(DISTINCT c.id) AS eventos,
+                   COUNT(*) AS jogadas,
+                   SUM(CASE WHEN i.id IN (p.dupla_a_j1, p.dupla_a_j2) THEN p.games_a ELSE p.games_b END) AS games,
+                   SUM(CASE WHEN i.id IN (p.dupla_a_j1, p.dupla_a_j2) THEN p.games_b ELSE p.games_a END) AS sofridos
+            FROM inscricoes i
+            JOIN users u ON u.id = i.jogador_id
+            JOIN campeonatos c ON c.id = i.campeonato_id
+            JOIN rodadas r ON r.campeonato_id = c.id
+            JOIN partidas p ON p.rodada_id = r.id
+                 AND i.id IN (p.dupla_a_j1, p.dupla_a_j2, p.dupla_b_j1, p.dupla_b_j2)
+            WHERE {$onde}
+            GROUP BY u.id, u.nome
+            ORDER BY games DESC, u.nome ASC
+        ";
+
+        $busca = $pdo->prepare($sql);
+        $busca->execute($valores);
+
+        $linhas = $busca->fetchAll();
+        foreach ($linhas as $indice => $linha) {
+            $eventos = (int) $linha['eventos'];
+            $linhas[$indice]['saldo'] = (int) $linha['games'] - (int) $linha['sofridos'];
+            $linhas[$indice]['media'] = $eventos > 0 ? round((int) $linha['games'] / $eventos, 1) : 0.0;
+        }
+
+        return $linhas;
+    }
+}
+```
+
+A montagem de `$onde` junta so nomes de condicao escritos no proprio codigo. Os valores vao por parametro. Nenhum dado de usuario entra na string SQL.
+
+- [ ] **Passo 4: rodar o teste e confirmar que passa**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\teste_ranking.php`
+Esperado: PASSOU, com 0 falhas.
+
+- [ ] **Passo 5: rodar a bateria inteira**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\executar.php`
+Esperado: `TUDO PASSOU`.
+
+- [ ] **Passo 6: commit**
+
+```bash
+git add src/Ranking.php testes/teste_ranking.php
+git commit -m "feat: ranking acumulado entre eventos com filtro por periodo"
+```
+
+---
+
+## Tarefa 10: Layout, login e cadastro
+
+**Arquivos:**
+- Criar: `views/layout.php`, `views/login.php`
+- Criar: `public/css/estilo.css`
+- Criar: `public/login.php`, `public/logout.php`, `public/cabecalho.php`
+
+**Interfaces:**
+- Consome: `Auth` (tarefa 6), `iniciarSessao()` e `csrf_*` (tarefa 5), `db()` (tarefa 4).
+- Produz: `public/cabecalho.php`, que todo ponto de entrada inclui na primeira linha. Ele carrega config, sessao, csrf, db e as classes de `src/`.
+
+- [ ] **Passo 1: escrever `public/cabecalho.php`**
+
+```php
+<?php
+
+require_once __DIR__ . '/../config/sessao.php';
+require_once __DIR__ . '/../config/csrf.php';
+require_once __DIR__ . '/../config/acesso.php';
+require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../src/Rodizio.php';
+require_once __DIR__ . '/../src/Sorteio.php';
+require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/Campeonato.php';
+require_once __DIR__ . '/../src/Placar.php';
+require_once __DIR__ . '/../src/Ranking.php';
+
+iniciarSessao();
+
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: same-origin');
+```
+
+- [ ] **Passo 2: escrever `views/layout.php`**
+
+```php
+<?php
+/** @var string $titulo */
+/** @var string $conteudo */
+?>
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?= e($titulo) ?> - Super 8</title>
+<link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+<header class="topo">
+  <a class="marca" href="index.php">Super 8</a>
+  <?php if (usuarioLogado() !== null): ?>
+    <nav>
+      <a href="index.php">Campeonatos</a>
+      <a href="ranking.php">Ranking</a>
+      <a href="logout.php">Sair</a>
+    </nav>
+  <?php endif; ?>
+</header>
+<main>
+  <h1><?= e($titulo) ?></h1>
+  <?= $conteudo ?>
+</main>
+</body>
+</html>
+```
+
+O `$conteudo` sai sem escape porque e HTML montado pelas proprias views. Todo dado de banco ou de formulario ja passou por `e()` dentro delas.
+
+- [ ] **Passo 3: escrever `public/css/estilo.css`**
+
+```css
+:root { --azul: #1d4ed8; --cinza: #f4f4f5; --borda: #d4d4d8; --texto: #18181b; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: var(--texto); background: #fff; }
+.topo { display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+        padding: .75rem 1rem; background: var(--azul); color: #fff; }
+.topo a { color: #fff; text-decoration: none; margin-left: 1rem; }
+.marca { font-weight: 700; margin: 0; }
+main { max-width: 900px; margin: 0 auto; padding: 1rem; }
+h1 { font-size: 1.4rem; }
+form { display: grid; gap: .75rem; max-width: 460px; }
+label { display: grid; gap: .25rem; font-size: .9rem; }
+input, select, textarea { padding: .6rem; font-size: 1rem; border: 1px solid var(--borda); border-radius: 6px; }
+button { padding: .7rem 1rem; font-size: 1rem; border: 0; border-radius: 6px;
+         background: var(--azul); color: #fff; cursor: pointer; }
+button.secundario { background: var(--cinza); color: var(--texto); }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+th, td { padding: .5rem; border-bottom: 1px solid var(--borda); text-align: left; }
+.erro { padding: .75rem; border-radius: 6px; background: #fee2e2; color: #991b1b; }
+.aviso { padding: .75rem; border-radius: 6px; background: #fef9c3; color: #713f12; }
+.partida { border: 1px solid var(--borda); border-radius: 8px; padding: .75rem; margin-bottom: .75rem; }
+.placar input { width: 4rem; font-size: 1.3rem; text-align: center; }
+@media (max-width: 600px) { main { padding: .75rem; } .placar input { width: 3.4rem; } }
+```
+
+- [ ] **Passo 4: escrever `views/login.php`**
+
+```php
+<?php
+/** @var string|null $erro */
+?>
+<?php if ($erro !== null): ?><p class="erro"><?= e($erro) ?></p><?php endif; ?>
+
+<h2>Entrar</h2>
+<form method="post" action="login.php">
+  <?= csrf_campo() ?>
+  <input type="hidden" name="acao" value="entrar">
+  <label>E-mail <input type="email" name="email" required autocomplete="email"></label>
+  <label>Senha <input type="password" name="senha" required autocomplete="current-password"></label>
+  <button type="submit">Entrar</button>
+</form>
+
+<h2>Criar conta de organizador</h2>
+<form method="post" action="login.php">
+  <?= csrf_campo() ?>
+  <input type="hidden" name="acao" value="cadastrar">
+  <label>Nome <input type="text" name="nome" required></label>
+  <label>E-mail <input type="email" name="email" required autocomplete="email"></label>
+  <label>Senha <input type="password" name="senha" required minlength="8" autocomplete="new-password"></label>
+  <button type="submit">Criar conta</button>
+</form>
+
+<p class="aviso">
+  Guardamos seu nome e e-mail apenas para identificar sua conta e os campeonatos que voce organiza.
+  Os nomes dos competidores aparecem no chaveamento, na classificacao e no ranking.
+</p>
+```
+
+- [ ] **Passo 5: escrever `public/login.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+if (usuarioLogado() !== null) {
+    header('Location: index.php');
+    exit;
+}
+
+$erro = null;
+$pdo = db();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_conferir();
+    $acao = $_POST['acao'] ?? '';
+    $email = (string) ($_POST['email'] ?? '');
+    $senha = (string) ($_POST['senha'] ?? '');
+
+    try {
+        if ($acao === 'cadastrar') {
+            Auth::cadastrar($pdo, (string) ($_POST['nome'] ?? ''), $email, $senha);
+        }
+
+        $bloqueio = Auth::bloqueadoAte($pdo, $email);
+        if ($bloqueio !== null) {
+            $erro = 'Muitas tentativas. Tente de novo depois das ' . substr($bloqueio, 11, 5) . '.';
+        } else {
+            $usuario = Auth::autenticar($pdo, $email, $senha);
+            if ($usuario === null) {
+                Auth::registrarFalha($pdo, $email);
+                $erro = 'E-mail ou senha invalidos.';
+            } else {
+                Auth::limparFalhas($pdo, $email);
+                session_regenerate_id(true);
+                $_SESSION['usuario'] = $usuario;
+                header('Location: index.php');
+                exit;
+            }
+        }
+    } catch (InvalidArgumentException $excecao) {
+        $erro = $excecao->getMessage();
+    }
+}
+
+$titulo = 'Entrar';
+ob_start();
+require __DIR__ . '/../views/login.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+A mensagem de erro e a mesma para e-mail inexistente e senha errada. Diferenciar as duas entregaria a lista de e-mails cadastrados.
+
+- [ ] **Passo 6: escrever `public/logout.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$_SESSION = [];
+session_destroy();
+
+header('Location: login.php');
+exit;
+```
+
+- [ ] **Passo 7: testar no navegador**
+
+Ligar Apache e MySQL no XAMPP e abrir `http://localhost/super8/public/login.php`.
+Esperado: criar conta com senha de 8 caracteres ou mais funciona e cai na lista de campeonatos. Senha errada devolve `E-mail ou senha invalidos`. Cinco erros seguidos bloqueiam com mensagem de horario.
+
+- [ ] **Passo 8: commit**
+
+```bash
+git add public/ views/
+git commit -m "feat: layout, login, cadastro e logout"
+```
+
+---
+
+## Tarefa 11: Lista e formulario de campeonatos
+
+**Arquivos:**
+- Criar: `views/campeonatos.php`, `views/campeonato_form.php`
+- Criar: `public/index.php`, `public/campeonato.php`
+
+**Interfaces:**
+- Consome: `Campeonato::listarDoOrganizador`, `Campeonato::criar`, `Campeonato::atualizar`, `Campeonato::buscar`, `exigirLogin`, `exigirDonoDoCampeonato`.
+
+- [ ] **Passo 1: escrever `public/index.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$pdo = db();
+$usuario = exigirLogin($pdo);
+$campeonatos = Campeonato::listarDoOrganizador($pdo, (int) $usuario['id']);
+
+$titulo = 'Meus campeonatos';
+ob_start();
+require __DIR__ . '/../views/campeonatos.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+- [ ] **Passo 2: escrever `views/campeonatos.php`**
+
+```php
+<?php
+/** @var array $campeonatos */
+$rotulos = [
+    'rascunho'     => 'Rascunho',
+    'sorteado'     => 'Sorteado',
+    'em_andamento' => 'Em andamento',
+    'encerrado'    => 'Encerrado',
+];
+?>
+<p><a href="campeonato.php"><button type="button">Novo campeonato</button></a></p>
+
+<?php if ($campeonatos === []): ?>
+  <p>Voce ainda nao criou nenhum campeonato.</p>
+<?php else: ?>
+  <table>
+    <tr><th>Nome</th><th>Data</th><th>Local</th><th>Situacao</th><th></th></tr>
+    <?php foreach ($campeonatos as $campeonato): ?>
+      <tr>
+        <td><?= e($campeonato['nome']) ?></td>
+        <td><?= e(date('d/m/Y', strtotime($campeonato['data_evento']))) ?></td>
+        <td><?= e($campeonato['local']) ?></td>
+        <td><?= e($rotulos[$campeonato['status']]) ?></td>
+        <td>
+          <a href="inscricoes.php?id=<?= (int) $campeonato['id'] ?>">Competidores</a>
+          <a href="chaveamento.php?id=<?= (int) $campeonato['id'] ?>">Chaveamento</a>
+          <a href="classificacao.php?id=<?= (int) $campeonato['id'] ?>">Classificacao</a>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+  </table>
+<?php endif; ?>
+```
+
+- [ ] **Passo 3: escrever `public/campeonato.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$pdo = db();
+$usuario = exigirLogin($pdo);
+
+$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$campeonato = null;
+$erro = null;
+
+if ($id > 0) {
+    $campeonato = exigirDonoDoCampeonato($pdo, $id);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_conferir();
+
+    $dados = [
+        'nome'        => (string) ($_POST['nome'] ?? ''),
+        'data_evento' => (string) ($_POST['data_evento'] ?? ''),
+        'local'       => (string) ($_POST['local'] ?? ''),
+        'custo'       => (string) ($_POST['custo'] ?? ''),
+        'descricao'   => (string) ($_POST['descricao'] ?? ''),
+    ];
+
+    if (trim($dados['nome']) === '' || $dados['data_evento'] === '') {
+        $erro = 'Informe pelo menos o nome e a data do evento.';
+    } elseif ($id > 0) {
+        Campeonato::atualizar($pdo, $id, $dados);
+        header('Location: inscricoes.php?id=' . $id);
+        exit;
+    } else {
+        $novoId = Campeonato::criar($pdo, (int) $usuario['id'], $dados);
+        header('Location: inscricoes.php?id=' . $novoId);
+        exit;
+    }
+}
+
+$titulo = $id > 0 ? 'Editar campeonato' : 'Novo campeonato';
+ob_start();
+require __DIR__ . '/../views/campeonato_form.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+- [ ] **Passo 4: escrever `views/campeonato_form.php`**
+
+```php
+<?php
+/** @var array|null $campeonato */
+/** @var string|null $erro */
+?>
+<?php if ($erro !== null): ?><p class="erro"><?= e($erro) ?></p><?php endif; ?>
+
+<form method="post">
+  <?= csrf_campo() ?>
+  <label>Nome do campeonato
+    <input type="text" name="nome" required value="<?= e($campeonato['nome'] ?? '') ?>"></label>
+  <label>Data do evento
+    <input type="date" name="data_evento" required value="<?= e($campeonato['data_evento'] ?? '') ?>"></label>
+  <label>Local
+    <input type="text" name="local" value="<?= e($campeonato['local'] ?? '') ?>"></label>
+  <label>Custo por jogador, em reais. Deixe vazio se for gratuito
+    <input type="number" name="custo" step="0.01" min="0" value="<?= e($campeonato['custo'] ?? '') ?>"></label>
+  <label>Descricao
+    <textarea name="descricao" rows="4"><?= e($campeonato['descricao'] ?? '') ?></textarea></label>
+  <button type="submit">Salvar</button>
+</form>
+```
+
+- [ ] **Passo 5: testar no navegador**
+
+Abrir `http://localhost/super8/public/index.php`, criar um campeonato e conferir que ele aparece na lista.
+Depois, logar com outra conta e abrir `campeonato.php?id=<id da primeira conta>`.
+Esperado: pagina 404 com `Campeonato nao encontrado`, sem vazar dado nenhum.
+
+- [ ] **Passo 6: commit**
+
+```bash
+git add public/index.php public/campeonato.php views/campeonatos.php views/campeonato_form.php
+git commit -m "feat: lista e formulario de campeonatos"
+```
+
+---
+
+## Tarefa 12: Inscricoes e sorteio pela tela
+
+**Arquivos:**
+- Criar: `views/inscricoes.php`
+- Criar: `public/inscricoes.php`, `public/sortear.php`
+
+- [ ] **Passo 1: escrever `public/inscricoes.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$pdo = db();
+$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$campeonato = exigirDonoDoCampeonato($pdo, $id);
+$erro = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_conferir();
+    try {
+        if (($_POST['acao'] ?? '') === 'remover') {
+            if (Campeonato::temPlacarLancado($pdo, $id)) {
+                throw new RuntimeException('Nao da para mexer nos competidores com placar lancado.');
+            }
+            Campeonato::removerInscricao($pdo, $id, (int) $_POST['inscricao_id']);
+        } else {
+            Campeonato::inscrever($pdo, $id, (string) ($_POST['nome_exibicao'] ?? ''), null);
+        }
+        header('Location: inscricoes.php?id=' . $id);
+        exit;
+    } catch (InvalidArgumentException | RuntimeException $excecao) {
+        $erro = $excecao->getMessage();
+    } catch (PDOException $excecao) {
+        $erro = 'Ja existe competidor com esse nome neste campeonato.';
+    }
+}
+
+$inscricoes = Campeonato::listarInscricoes($pdo, $id);
+
+$titulo = 'Competidores de ' . $campeonato['nome'];
+ob_start();
+require __DIR__ . '/../views/inscricoes.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+- [ ] **Passo 2: escrever `views/inscricoes.php`**
+
+```php
+<?php
+/** @var array $campeonato */
+/** @var array $inscricoes */
+/** @var string|null $erro */
+$total = count($inscricoes);
+?>
+<?php if ($erro !== null): ?><p class="erro"><?= e($erro) ?></p><?php endif; ?>
+
+<p><?= $total ?> de 8 competidores.</p>
+
+<table>
+  <tr><th>Posicao</th><th>Nome</th><th></th></tr>
+  <?php foreach ($inscricoes as $inscricao): ?>
+    <tr>
+      <td><?= $inscricao['posicao_sorteio'] !== null ? (int) $inscricao['posicao_sorteio'] : '-' ?></td>
+      <td><?= e($inscricao['nome_exibicao']) ?></td>
+      <td>
+        <form method="post" style="display:inline">
+          <?= csrf_campo() ?>
+          <input type="hidden" name="acao" value="remover">
+          <input type="hidden" name="inscricao_id" value="<?= (int) $inscricao['id'] ?>">
+          <button type="submit" class="secundario">Tirar</button>
+        </form>
+      </td>
+    </tr>
+  <?php endforeach; ?>
+</table>
+
+<?php if ($total < 8): ?>
+  <form method="post">
+    <?= csrf_campo() ?>
+    <label>Nome do competidor <input type="text" name="nome_exibicao" required></label>
+    <button type="submit">Adicionar</button>
+  </form>
+  <p class="aviso">
+    O nome do competidor aparece no chaveamento, na classificacao e no ranking.
+    Quem entra so pelo nome, sem conta, nao acumula pontos entre eventos.
+  </p>
+<?php else: ?>
+  <form method="post" action="sortear.php">
+    <?= csrf_campo() ?>
+    <input type="hidden" name="id" value="<?= (int) $campeonato['id'] ?>">
+    <button type="submit"><?= $campeonato['seed_sorteio'] === null ? 'Sortear e gerar as rodadas' : 'Refazer o sorteio' ?></button>
+  </form>
+<?php endif; ?>
+```
+
+- [ ] **Passo 3: escrever `public/sortear.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit('Metodo nao permitido.');
+}
+
+csrf_conferir();
+
+$pdo = db();
+$id = (int) ($_POST['id'] ?? 0);
+exigirDonoDoCampeonato($pdo, $id);
+
+try {
+    Campeonato::sortear($pdo, $id);
+} catch (RuntimeException $excecao) {
+    http_response_code(400);
+    exit(e($excecao->getMessage()));
+}
+
+header('Location: chaveamento.php?id=' . $id);
+exit;
+```
+
+O sorteio so aceita POST. Por GET, um link compartilhado no grupo do WhatsApp refaria o sorteio de quem clicasse.
+
+- [ ] **Passo 4: testar no navegador**
+
+Cadastrar 8 competidores, sortear e conferir que as posicoes de 1 a 8 aparecem preenchidas.
+Tentar cadastrar um nono: o botao some e, se a requisicao for forcada, a mensagem de limite aparece.
+Cadastrar dois competidores com o mesmo nome: mensagem de nome repetido.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add public/inscricoes.php public/sortear.php views/inscricoes.php
+git commit -m "feat: cadastro de competidores e sorteio pela tela"
+```
+
+---
+
+## Tarefa 13: Chaveamento e lancamento de placar
+
+**Arquivos:**
+- Criar: `views/chaveamento.php`
+- Criar: `public/chaveamento.php`, `public/placar.php`
+
+- [ ] **Passo 1: escrever `public/chaveamento.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$pdo = db();
+$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$campeonato = exigirDonoDoCampeonato($pdo, $id);
+$rodadas = Campeonato::chaveamento($pdo, $id);
+
+$titulo = 'Chaveamento de ' . $campeonato['nome'];
+ob_start();
+require __DIR__ . '/../views/chaveamento.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+- [ ] **Passo 2: escrever `views/chaveamento.php`**
+
+```php
+<?php
+/** @var array $campeonato */
+/** @var array $rodadas */
+?>
+<?php if ($rodadas === []): ?>
+  <p>As rodadas ainda nao foram geradas. Cadastre os 8 competidores e faca o sorteio.</p>
+  <p><a href="inscricoes.php?id=<?= (int) $campeonato['id'] ?>">Ir para os competidores</a></p>
+<?php else: ?>
+  <p>Semente do sorteio: <?= (int) $campeonato['seed_sorteio'] ?>. Guardar esse numero permite refazer o mesmo sorteio e conferir o chaveamento.</p>
+
+  <?php foreach ($rodadas as $rodada): ?>
+    <h2>Rodada <?= (int) $rodada['numero'] ?></h2>
+    <?php foreach ($rodada['partidas'] as $partida): ?>
+      <div class="partida">
+        <p>Quadra <?= (int) $partida['quadra'] ?></p>
+        <form class="placar" method="post" action="placar.php">
+          <?= csrf_campo() ?>
+          <input type="hidden" name="campeonato_id" value="<?= (int) $campeonato['id'] ?>">
+          <input type="hidden" name="partida_id" value="<?= (int) $partida['id'] ?>">
+          <p>
+            <?= e($partida['a1']) ?> e <?= e($partida['a2']) ?>
+            <input type="number" name="games_a" min="0" max="99" required
+                   value="<?= $partida['games_a'] !== null ? (int) $partida['games_a'] : '' ?>">
+          </p>
+          <p>
+            <?= e($partida['b1']) ?> e <?= e($partida['b2']) ?>
+            <input type="number" name="games_b" min="0" max="99" required
+                   value="<?= $partida['games_b'] !== null ? (int) $partida['games_b'] : '' ?>">
+          </p>
+          <button type="submit"><?= (int) $partida['encerrada'] === 1 ? 'Corrigir placar' : 'Gravar placar' ?></button>
+        </form>
+      </div>
+    <?php endforeach; ?>
+  <?php endforeach; ?>
+
+  <p><a href="classificacao.php?id=<?= (int) $campeonato['id'] ?>">Ver classificacao</a></p>
+<?php endif; ?>
+```
+
+Um formulario por partida, com dois campos numericos grandes e um botao. Na quadra, o organizador toca em dois campos e grava.
+
+- [ ] **Passo 3: escrever `public/placar.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit('Metodo nao permitido.');
+}
+
+csrf_conferir();
+
+$pdo = db();
+$campeonatoId = (int) ($_POST['campeonato_id'] ?? 0);
+exigirDonoDoCampeonato($pdo, $campeonatoId);
+
+$partidaId = (int) ($_POST['partida_id'] ?? 0);
+
+$usuario = usuarioLogado();
+
+// Placar::gravar confere sozinho que a partida pertence ao campeonato, sob a trava
+// da linha do campeonato. Repetir a conferencia aqui, fora da trava, nao acrescenta nada.
+try {
+    Placar::gravar($pdo, $campeonatoId, $partidaId, (int) ($_POST['games_a'] ?? -1), (int) ($_POST['games_b'] ?? -1), (int) $usuario['id']);
+} catch (InvalidArgumentException | RuntimeException $excecao) {
+    http_response_code(400);
+    exit(e($excecao->getMessage()));
+}
+
+$pdo->prepare("UPDATE campeonatos SET status = 'em_andamento' WHERE id = ? AND status = 'sorteado'")
+    ->execute([$campeonatoId]);
+
+header('Location: chaveamento.php?id=' . $campeonatoId . '#partida-' . $partidaId);
+exit;
+```
+
+A conferencia de que a partida pertence ao campeonato acontece dentro de `Placar::gravar`, sob a trava da linha do campeonato, e e o que impede alguem de trocar o `partida_id` no formulario e gravar placar em evento alheio. A mensagem de recusa nao diz se a partida existe em outro campeonato.
+
+- [ ] **Passo 4: testar no navegador**
+
+Lancar as 14 partidas e conferir que os valores voltam preenchidos ao recarregar.
+Editar o `partida_id` no inspetor para o id de uma partida de outro campeonato: a resposta e 404.
+Enviar games acima de 99: a resposta e 400 com a mensagem de faixa.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add public/chaveamento.php public/placar.php views/chaveamento.php
+git commit -m "feat: tela de chaveamento e lancamento de placar"
+```
+
+---
+
+## Tarefa 14: Classificacao do evento e encerramento
+
+**Arquivos:**
+- Criar: `views/classificacao.php`
+- Criar: `public/classificacao.php`, `public/encerrar.php`
+
+- [ ] **Passo 1: escrever `public/classificacao.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$pdo = db();
+$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$campeonato = exigirDonoDoCampeonato($pdo, $id);
+$linhas = Placar::classificacao($pdo, $id);
+
+$contaPendentes = $pdo->prepare(
+    'SELECT COUNT(*) FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
+     WHERE r.campeonato_id = ? AND p.encerrada = 0'
+);
+$contaPendentes->execute([$id]);
+$pendentes = (int) $contaPendentes->fetchColumn();
+
+$titulo = 'Classificacao de ' . $campeonato['nome'];
+ob_start();
+require __DIR__ . '/../views/classificacao.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+- [ ] **Passo 2: escrever `views/classificacao.php`**
+
+```php
+<?php
+/** @var array $campeonato */
+/** @var array $linhas */
+/** @var int $pendentes */
+?>
+<?php if ($pendentes > 0): ?>
+  <p class="aviso"><?= $pendentes ?> partida(s) ainda sem placar. A classificacao muda conforme os resultados entram.</p>
+<?php endif; ?>
+
+<table>
+  <tr><th>#</th><th>Jogador</th><th>Games</th><th>Sofridos</th><th>Saldo</th><th>Vitorias</th><th>Jogos</th></tr>
+  <?php foreach ($linhas as $posicao => $linha): ?>
+    <tr>
+      <td><?= $posicao + 1 ?><?= $linha['empatado'] ? ' (empate)' : '' ?></td>
+      <td><?= e($linha['nome']) ?></td>
+      <td><?= (int) $linha['games'] ?></td>
+      <td><?= (int) $linha['sofridos'] ?></td>
+      <td><?= (int) $linha['saldo'] ?></td>
+      <td><?= (int) $linha['vitorias'] ?></td>
+      <td><?= (int) $linha['jogadas'] ?></td>
+    </tr>
+  <?php endforeach; ?>
+</table>
+
+<p>Criterios de desempate, nesta ordem: games ganhos, saldo de games, vitorias e confronto direto. Quem empata em tudo aparece marcado como empate.</p>
+
+<?php if ($campeonato['status'] !== 'encerrado' && $pendentes === 0): ?>
+  <form method="post" action="encerrar.php">
+    <?= csrf_campo() ?>
+    <input type="hidden" name="id" value="<?= (int) $campeonato['id'] ?>">
+    <button type="submit">Encerrar o campeonato</button>
+  </form>
+  <p>Encerrar leva os resultados para o ranking acumulado.</p>
+<?php elseif ($campeonato['status'] === 'encerrado'): ?>
+  <p>Campeonato encerrado. Os resultados ja estao no ranking acumulado.</p>
+<?php endif; ?>
+```
+
+- [ ] **Passo 3: escrever `public/encerrar.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit('Metodo nao permitido.');
+}
+
+csrf_conferir();
+
+$pdo = db();
+$id = (int) ($_POST['id'] ?? 0);
+exigirDonoDoCampeonato($pdo, $id);
+
+$contaPendentes = $pdo->prepare(
+    'SELECT COUNT(*) FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
+     WHERE r.campeonato_id = ? AND p.encerrada = 0'
+);
+$contaPendentes->execute([$id]);
+$pendentes = (int) $contaPendentes->fetchColumn();
+
+if ($pendentes > 0) {
+    http_response_code(400);
+    exit('Ainda faltam placares para encerrar.');
+}
+
+$pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?")->execute([$id]);
+
+header('Location: classificacao.php?id=' . $id);
+exit;
+```
+
+- [ ] **Passo 4: testar no navegador**
+
+Com as 14 partidas lancadas, abrir a classificacao e conferir que a soma de games de cada jogador bate com a conta manual de duas ou tres linhas. Encerrar e conferir que o botao some.
+
+- [ ] **Passo 5: commit**
+
+```bash
+git add public/classificacao.php public/encerrar.php views/classificacao.php
+git commit -m "feat: classificacao do evento e encerramento"
+```
+
+---
+
+## Tarefa 15: Tela do ranking acumulado
+
+**Arquivos:**
+- Criar: `views/ranking.php`
+- Criar: `public/ranking.php`
+
+- [ ] **Passo 1: escrever `public/ranking.php`**
+
+```php
+<?php
+
+require __DIR__ . '/cabecalho.php';
+
+$pdo = db();
+exigirLogin($pdo);
+
+$periodo = $_GET['periodo'] ?? 'ano';
+$hoje = date('Y-m-d');
+
+switch ($periodo) {
+    case 'mes':
+        $de = date('Y-m-01');
+        $ate = date('Y-m-t');
+        break;
+    case 'livre':
+        $de = (string) ($_GET['de'] ?? '');
+        $ate = (string) ($_GET['ate'] ?? '');
+        break;
+    case 'tudo':
+        $de = null;
+        $ate = null;
+        break;
+    default:
+        $periodo = 'ano';
+        $de = date('Y-01-01');
+        $ate = date('Y-12-31');
+}
+
+foreach (['de', 'ate'] as $campo) {
+    $valor = $$campo;
+    if ($valor !== null && $valor !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $valor) !== 1) {
+        $$campo = null;
+    }
+}
+
+$linhas = Ranking::acumulado($pdo, $de, $ate);
+
+$titulo = 'Ranking acumulado';
+ob_start();
+require __DIR__ . '/../views/ranking.php';
+$conteudo = ob_get_clean();
+require __DIR__ . '/../views/layout.php';
+```
+
+A conferencia por expressao regular garante que so chega ao banco data no formato esperado, mesmo com o parametro vindo por prepared statement.
+
+- [ ] **Passo 2: escrever `views/ranking.php`**
+
+```php
+<?php
+/** @var array $linhas */
+/** @var string $periodo */
+/** @var ?string $de */
+/** @var ?string $ate */
+?>
+<form method="get" action="ranking.php">
+  <label>Periodo
+    <select name="periodo" onchange="this.form.submit()">
+      <option value="mes"   <?= $periodo === 'mes' ? 'selected' : '' ?>>Mes atual</option>
+      <option value="ano"   <?= $periodo === 'ano' ? 'selected' : '' ?>>Ano atual</option>
+      <option value="tudo"  <?= $periodo === 'tudo' ? 'selected' : '' ?>>Tudo</option>
+      <option value="livre" <?= $periodo === 'livre' ? 'selected' : '' ?>>Intervalo livre</option>
+    </select>
+  </label>
+  <?php if ($periodo === 'livre'): ?>
+    <label>De <input type="date" name="de" value="<?= e($de) ?>"></label>
+    <label>Ate <input type="date" name="ate" value="<?= e($ate) ?>"></label>
+    <button type="submit">Filtrar</button>
+  <?php endif; ?>
+</form>
+
+<?php if ($linhas === []): ?>
+  <p>Nenhum campeonato encerrado neste periodo.</p>
+<?php else: ?>
+  <table>
+    <tr><th>#</th><th>Jogador</th><th>Eventos</th><th>Jogos</th><th>Games</th><th>Saldo</th><th>Media por evento</th></tr>
+    <?php foreach ($linhas as $posicao => $linha): ?>
+      <tr>
+        <td><?= $posicao + 1 ?></td>
+        <td><?= e($linha['nome']) ?></td>
+        <td><?= (int) $linha['eventos'] ?></td>
+        <td><?= (int) $linha['jogadas'] ?></td>
+        <td><?= (int) $linha['games'] ?></td>
+        <td><?= (int) $linha['saldo'] ?></td>
+        <td><?= e(number_format((float) $linha['media'], 1, ',', '.')) ?></td>
+      </tr>
+    <?php endforeach; ?>
+  </table>
+<?php endif; ?>
+
+<p>Somente campeonatos encerrados entram no ranking. Competidor cadastrado apenas pelo nome, sem conta no sistema, aparece na classificacao do evento dele mas nao acumula entre eventos.</p>
+```
+
+- [ ] **Passo 3: testar no navegador**
+
+Abrir `ranking.php` com um campeonato encerrado e conferir que so aparece jogador com conta. Trocar o periodo para um mes sem evento e conferir a mensagem de lista vazia.
+
+- [ ] **Passo 4: commit**
+
+```bash
+git add public/ranking.php views/ranking.php
+git commit -m "feat: tela do ranking acumulado com filtro por periodo"
+```
+
+---
+
+## Tarefa 16: Teste de ponta a ponta e pacote de publicacao
+
+**Arquivos:**
+- Criar: `sql/seed_demo.sql`
+- Criar: `docs/roteiro-teste.md`
+- Modificar: `README.md`
+
+- [ ] **Passo 1: rodar a bateria de testes inteira**
+
+Run: `C:\xampp\php\php.exe C:\xampp\htdocs\super8\testes\executar.php`
+Esperado: `TUDO PASSOU`, com 0 falhas em todos os arquivos.
+
+- [ ] **Passo 2: escrever `docs/roteiro-teste.md`**
+
+```markdown
+# Roteiro de teste de ponta a ponta
+
+1. Criar conta de organizador com senha de 8 caracteres ou mais.
+2. Errar a senha 5 vezes seguidas e conferir a mensagem de bloqueio com horario.
+3. Entrar com a senha certa e conferir que o bloqueio sumiu.
+4. Criar um campeonato com nome, data e local.
+5. Cadastrar 8 competidores. Tentar cadastrar o nono e conferir a recusa.
+6. Tentar cadastrar dois com o mesmo nome e conferir a recusa.
+7. Sortear. Conferir que as posicoes de 1 a 8 ficaram preenchidas e que a semente aparece no chaveamento.
+8. Conferir no chaveamento que cada rodada tem 2 partidas e que os 8 nomes aparecem uma vez por rodada.
+9. Lancar os 14 placares. Conferir que os valores voltam ao recarregar.
+10. Abrir a classificacao e conferir a mano a soma de games de dois jogadores.
+11. Encerrar o campeonato.
+12. Abrir o ranking e conferir que apenas jogador com conta aparece.
+13. Sair, entrar com outra conta e tentar abrir o campeonato da primeira pelo id na URL. Esperado: 404.
+14. Repetir o passo 13 com `chaveamento.php`, `classificacao.php` e `inscricoes.php`.
+```
+
+- [ ] **Passo 3: executar o roteiro inteiro e anotar cada falha**
+
+Cada falha vira correcao com teste antes do commit. Nao seguir para o passo 4 com item pendente.
+
+- [ ] **Passo 4: escrever `sql/seed_demo.sql`**
+
+```sql
+-- Dados de demonstracao. Nao usar em producao.
+USE super8;
+
+INSERT INTO users (nome, email, senha_hash, e_organizador, ativo, criado_em)
+VALUES ('Organizador Demo', 'demo@exemplo.com',
+        '$argon2id$v=19$m=65536,t=4,p=1$TROQUE$TROQUE', 1, 1, NOW());
+```
+
+Trocar o hash por um gerado na maquina:
+`C:\xampp\php\php.exe -r "echo password_hash('senhademo123', PASSWORD_ARGON2ID);"`
+
+- [ ] **Passo 5: escrever a rotina de exclusao a pedido do titular**
+
+A especificacao exige atender ao direito de exclusao da LGPD sem apagar registro, porque a regra do projeto proibe exclusao de arquivo e de dado. A saida e anonimizar e desativar.
+
+Criar `admin/anonimizar.php`, executado apenas por linha de comando:
+
+```php
+<?php
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
+require __DIR__ . '/../config/db.php';
+
+$email = $argv[1] ?? '';
+if ($email === '') {
+    exit("Uso: php admin/anonimizar.php email@do.titular\n");
+}
+
+$pdo = db();
+
+$busca = $pdo->prepare('SELECT id, nome FROM users WHERE email = ?');
+$busca->execute([strtolower(trim($email))]);
+$usuario = $busca->fetch();
+
+if ($usuario === false) {
+    exit("Nenhuma conta com esse e-mail.\n");
+}
+
+$id = (int) $usuario['id'];
+$apelido = 'Jogador removido ' . $id;
+
+$pdo->beginTransaction();
+
+$pdo->prepare('UPDATE inscricoes SET nome_exibicao = ? WHERE jogador_id = ?')->execute([$apelido, $id]);
+$pdo->prepare(
+    'UPDATE users SET nome = ?, email = NULL, senha_hash = NULL, google_id = NULL, foto_url = NULL, ativo = 0
+     WHERE id = ?'
+)->execute([$apelido, $id]);
+
+$pdo->commit();
+
+echo "Conta {$id} anonimizada e desativada. Os placares foram mantidos como dado estatistico.\n";
+```
+
+O acesso por CLI e proposital: e uma operacao rara, feita pelo administrador, e nao merece uma tela exposta na web.
+
+Atencao ao apagar a inscricao de campeonato: a chave unica `uk_camp_nome` impede dois competidores com o mesmo nome no mesmo campeonato. Se o titular participou do mesmo campeonato duas vezes, o que o schema ja impede, nao ha conflito. Se o `UPDATE` falhar por essa chave, o `rollBack` da transacao preserva o estado e o erro aparece no terminal.
+
+- [ ] **Passo 6: escrever `docs/lgpd.md`**
+
+```markdown
+# Tratamento de dados pessoais
+
+## O que o sistema guarda
+
+Nome e e-mail de quem cria conta. Nome de exibicao dos competidores. Placares e classificacoes.
+O sistema nao pede telefone, documento nem data de nascimento.
+
+## Base legal
+
+Organizador: execucao de contrato, ele se cadastra por vontade propria para usar a ferramenta.
+Competidor inscrito por terceiro: legitimo interesse na organizacao do torneio, com aviso na tela de inscricao
+informando que o nome aparece no chaveamento, na classificacao e no ranking.
+
+## Exclusao a pedido do titular
+
+`C:\xampp\php\php.exe admin/anonimizar.php email@do.titular`
+
+A rotina troca nome e nome de exibicao por um identificador anonimo, limpa e-mail, senha e foto,
+e desativa a conta. Os placares ficam, porque a partir daquele momento sao numero de evento
+sem ligacao com pessoa identificavel.
+
+## Retencao
+
+Dados de campeonato ficam enquanto o organizador mantiver a conta ativa.
+Nao ha compartilhamento com terceiros nem uso para publicidade.
+
+## Pendencia da etapa 2
+
+Politica de privacidade publicada, obrigatoria quando o login com Google passar a receber e-mail e foto.
+```
+
+- [ ] **Passo 7: montar o pacote de publicacao**
+
+```bash
+mkdir -p "/c/COWORK/CODE/SUPER8/_PUBLICAR/enviar"
+cp -r /c/xampp/htdocs/super8/{config,src,views,public,sql,README.md} "/c/COWORK/CODE/SUPER8/_PUBLICAR/enviar/"
+rm -f "/c/COWORK/CODE/SUPER8/_PUBLICAR/enviar/config/config.php"
+```
+
+O `config.php` fica de fora de proposito. No servidor, ele e criado a partir do `config.exemplo.php` com as credenciais de producao e `COOKIE_SEGURO` em true.
+
+As pastas `testes` e `admin` nao vao para producao. A rotina de anonimizacao roda na maquina do administrador, com acesso ao banco.
+
+- [ ] **Passo 8: atualizar o `README.md` com a secao de publicacao**
+
+```markdown
+## Publicar
+
+1. Rodar a bateria de testes e conferir `TUDO PASSOU`.
+2. Copiar `config`, `src`, `views`, `public` e `sql` para `_PUBLICAR\enviar`.
+3. No servidor, criar `config/config.php` a partir do exemplo, com as credenciais de producao e `COOKIE_SEGURO = true`.
+4. Rodar `sql/schema.sql` no banco de producao.
+5. Apontar o DocumentRoot ou o alias para a pasta `public`.
+```
+
+- [ ] **Passo 9: commit**
+
+```bash
+git add sql/seed_demo.sql docs/roteiro-teste.md docs/lgpd.md admin/anonimizar.php README.md
+git commit -m "docs: roteiro de teste, rotina de anonimizacao e instrucoes de publicacao"
+```
+
+---
+
+## Pendencia fora do plano
+
+O repositorio remoto no GitHub ainda nao existe. O `git init` da tarefa 1 cria so o repositorio local. Antes do primeiro `git push`, decidir o nome e se ele sera publico ou privado, e criar o remoto.

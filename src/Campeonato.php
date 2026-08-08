@@ -76,7 +76,17 @@ final class Campeonato
             $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
             $trava->execute([$campeonatoId]);
 
-            if (count(self::listarInscricoes($pdo, $campeonatoId)) >= 8) {
+            // Leitura travada (FOR UPDATE), nao listarInscricoes(): o mesmo
+            // buraco do sortear() sob REPEATABLE READ existe aqui. Se a
+            // transacao de quem chama ja tiver feito qualquer leitura comum
+            // antes (por exemplo, para render a tela de inscritos), uma
+            // contagem via listarInscricoes() continuaria presa aquela foto
+            // antiga mesmo depois da trava acima, e nao veria um 8o
+            // competidor que outra conexao acabou de comitar - permitindo um
+            // 9o, estado que o sorteio nunca mais aceita.
+            $travaContagem = $pdo->prepare('SELECT COUNT(*) FROM inscricoes WHERE campeonato_id = ? FOR UPDATE');
+            $travaContagem->execute([$campeonatoId]);
+            if ((int) $travaContagem->fetchColumn() >= 8) {
                 throw new RuntimeException('O campeonato ja tem 8 competidores.');
             }
 
@@ -129,28 +139,57 @@ final class Campeonato
 
     public static function removerInscricao(PDO $pdo, int $campeonatoId, int $inscricaoId): void
     {
-        // A condicao campeonato_id = ? impede que o id de uma inscricao de
-        // OUTRO campeonato seja apagado por aqui: sem ela, qualquer
-        // organizador que descobrisse o id de uma inscricao alheia poderia
-        // remove-la, mesmo sem ser dono daquele campeonato.
-        $comando = $pdo->prepare('DELETE FROM inscricoes WHERE id = ? AND campeonato_id = ?');
+        // Trava a linha do campeonato ANTES de tocar em inscricoes, na mesma
+        // ordem que inscrever() e sortear() usam (campeonatos primeiro,
+        // sempre). Se esta funcao travasse so a linha de inscricoes (ou
+        // nenhuma), uma transacao que chamasse removerInscricao() e depois
+        // inscrever()/sortear() adquiriria as travas em ordem invertida em
+        // relacao a uma transacao concorrente que chamasse
+        // inscrever()/sortear() primeiro - o cenario classico de deadlock
+        // entre duas transacoes que travam as mesmas duas linhas em ordens
+        // opostas. Manter uma ordem unica entre os tres metodos evita isso
+        // por construcao.
+        $transacaoPropria = !$pdo->inTransaction();
+        if ($transacaoPropria) {
+            $pdo->beginTransaction();
+        }
+
         try {
-            $comando->execute([$inscricaoId, $campeonatoId]);
-        } catch (PDOException $excecao) {
-            // Diferente do INSERT de inscrever(), aqui a classe SQLSTATE
-            // 23000 inteira pode virar a mesma mensagem sem risco de
-            // confundir o problema: um DELETE em inscricoes so tem UM jeito
-            // de esbarrar numa restricao de integridade, a FOREIGN KEY de
-            // partidas.dupla_* (o sorteio ja rodou e existem partidas
-            // apontando para esta inscricao). Nao ha UNIQUE KEY nem outra
-            // FOREIGN KEY que um DELETE possa violar aqui. Se um dia esta
-            // tabela ganhar outra restricao que um DELETE possa disparar,
-            // esta captura precisa ser estreitada do mesmo jeito que a de
-            // inscrever() foi.
-            if ($excecao->getCode() === '23000') {
-                throw new RuntimeException('Nao e possivel remover um competidor depois do sorteio.');
+            $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
+            $trava->execute([$campeonatoId]);
+
+            // A condicao campeonato_id = ? impede que o id de uma inscricao
+            // de OUTRO campeonato seja apagado por aqui: sem ela, qualquer
+            // organizador que descobrisse o id de uma inscricao alheia
+            // poderia remove-la, mesmo sem ser dono daquele campeonato.
+            $comando = $pdo->prepare('DELETE FROM inscricoes WHERE id = ? AND campeonato_id = ?');
+            try {
+                $comando->execute([$inscricaoId, $campeonatoId]);
+            } catch (PDOException $excecao) {
+                // Diferente do INSERT de inscrever(), aqui a classe SQLSTATE
+                // 23000 inteira pode virar a mesma mensagem sem risco de
+                // confundir o problema: um DELETE em inscricoes so tem UM
+                // jeito de esbarrar numa restricao de integridade, a
+                // FOREIGN KEY de partidas.dupla_* (o sorteio ja rodou e
+                // existem partidas apontando para esta inscricao). Nao ha
+                // UNIQUE KEY nem outra FOREIGN KEY que um DELETE possa
+                // violar aqui. Se um dia esta tabela ganhar outra restricao
+                // que um DELETE possa disparar, esta captura precisa ser
+                // estreitada do mesmo jeito que a de inscrever() foi.
+                if ($excecao->getCode() === '23000') {
+                    throw new RuntimeException('Nao e possivel remover um competidor depois do sorteio.');
+                }
+                throw $excecao;
             }
-            throw $excecao;
+
+            if ($transacaoPropria) {
+                $pdo->commit();
+            }
+        } catch (Throwable $erro) {
+            if ($transacaoPropria && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $erro;
         }
     }
 
@@ -201,11 +240,17 @@ final class Campeonato
      * quem chamou ja tenha feito antes desta chamada continua enxergando a
      * foto de antes, mesmo depois da trava ser adquirida. Por isso as duas
      * checagens de guarda abaixo usam leitura travada, e nao
-     * listarInscricoes()/temPlacarLancado(). Qualquer codigo futuro que
-     * grave um placar (partidas.games_a/games_b) PRECISA travar a mesma
-     * linha do campeonato antes de escrever: a trava so serializa contra
-     * quem trava a mesma linha, entao um placar gravado sem essa trava fica
-     * invisivel para a guarda deste metodo, mesmo com a leitura travada.
+     * listarInscricoes()/temPlacarLancado(). QUALQUER codigo futuro que
+     * grave um placar (partidas.games_a/games_b) OU que mude o conjunto de
+     * inscricoes de um campeonato (inscrever/remover/qualquer coisa que
+     * altere quem esta inscrito) PRECISA travar a mesma linha do campeonato
+     * antes de escrever, e nessa mesma ordem (campeonatos primeiro): a trava
+     * so serializa contra quem trava a mesma linha, entao uma escrita sem
+     * essa trava fica invisivel para a guarda deste metodo, mesmo com a
+     * leitura travada; e uma ordem de trava diferente entre metodos que
+     * mexem nas mesmas duas linhas (campeonatos e inscricoes/partidas) e
+     * receita para deadlock. inscrever() e removerInscricao() ja seguem
+     * este contrato.
      */
     public static function sortear(PDO $pdo, int $campeonatoId, ?int $semente = null): int
     {

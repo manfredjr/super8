@@ -25,6 +25,20 @@ $idsUsuariosCriados = [];
 $terminouDireito = false;
 
 register_shutdown_function(function () use (&$terminouDireito, &$idsCampeonatosCriados, &$idsUsuariosCriados, $pdo) {
+    // $pdo passa a maior parte deste arquivo com uma transacao aberta (o
+    // cenario 2 abre uma e so fecha perto do fim). Se um erro interromper o
+    // script no meio dessa transacao, o destrutor do PDO faz um rollback
+    // implicito ao encerrar o processo - e se isso acontecer DEPOIS das
+    // linhas de limpeza abaixo, cada DELETE que essa limpeza acabou de
+    // gravar e desfeito junto, deixando as tabelas sujas mesmo com este
+    // shutdown handler tendo "rodado". Por isso o rollback explicito vem
+    // PRIMEIRO aqui: fecha (desfaz) a transacao aberta antes de mais nada,
+    // para as DELETEs de limpeza a seguir rodarem fora de qualquer
+    // transacao prestes a ser descartada.
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
     foreach ($idsCampeonatosCriados as $campeonatoId) {
         $pdo->prepare('DELETE p FROM partidas p JOIN rodadas r ON r.id = p.rodada_id WHERE r.campeonato_id = ?')
             ->execute([$campeonatoId]);
@@ -92,9 +106,20 @@ try {
 }
 $duracaoBloqueio = microtime(true) - $inicio;
 
+// Cuidado com o que esta asserticao prova e o que ela nao prova: o tempo de
+// espera sozinho NAO isola qual trava causou o bloqueio. Mesmo sem o
+// SELECT ... FOR UPDATE explicito de inscrever(), o INSERT em inscricoes
+// ainda pegaria um lock implicito na linha referenciada de campeonatos por
+// causa da FOREIGN KEY fk_insc_camp, e esperaria os mesmos ~2s ate o
+// auxiliar comitar - entao esta medida de tempo, por si so, passaria mesmo
+// com a trava explicita removida. A prova de que a trava (e a contagem
+// travada) funcionam esta nas asserticoes de contagem abaixo (8, nunca 9);
+// esta aqui so confirma que a segunda chamada rodou de verdade contra o
+// auxiliar ainda em andamento, nao um artefato de timing entre dois
+// processos que nunca se cruzaram.
 Teste::verdade(
     $duracaoBloqueio >= 1.0,
-    "a segunda conexao ficou bloqueada esperando a trava (esperou {$duracaoBloqueio}s, o auxiliar segura por 2s)"
+    "a segunda chamada demorou para retornar, evidencia de concorrencia real e nao de sorte de timing (esperou {$duracaoBloqueio}s, o auxiliar segura por 2s)"
 );
 Teste::igual(
     'O campeonato ja tem 8 competidores.',
@@ -180,6 +205,76 @@ $pdo->rollBack();
 // recusou). O placar gravado por $pdo2 precisa ser limpo manualmente,
 // porque foi commitado fora desta transacao.
 $pdo->prepare('UPDATE partidas SET games_a = NULL, games_b = NULL WHERE id = ?')->execute([$idPrimeiraPartida]);
+
+// --- Cenario 3 (Importante, rodada de re-revisao): guarda de inscricao sob
+// REPEATABLE READ ----------------------------------------------------------
+// O mesmo buraco do cenario 2, agora em inscrever() em vez de sortear():
+// $pdo abre a propria transacao e faz uma leitura comum antes de qualquer
+// coisa mudar - por exemplo, para exibir a tela de inscritos. Uma segunda
+// conexao inscreve o 8o competidor e comita de verdade. $pdo entao tenta
+// inscrever um 9o: sem uma contagem travada, inscrever() ainda veria 7 (a
+// foto antiga da transacao de $pdo) e deixaria passar, terminando com um
+// campeonato de 9 competidores - o mesmo estado irreversivel que a trava
+// existe para impedir (Rodizio exige exatamente 8 posicoes).
+
+$campeonatoInscricao = Campeonato::criar($pdo, $organizadorId, [
+    'nome'        => 'Guarda de inscricao sob REPEATABLE READ',
+    'data_evento' => '2026-09-06',
+    'local'       => 'X',
+    'custo'       => '',
+    'descricao'   => '',
+]);
+$idsCampeonatosCriados[] = $campeonatoInscricao;
+foreach (range(1, 7) as $n) {
+    Campeonato::inscrever($pdo, $campeonatoInscricao, "Inscrito REPEATABLE READ {$n}", null);
+}
+
+$pdo->beginTransaction();
+// Leitura comum qualquer, dentro da transacao que inscrever() vai herdar
+// mais abaixo: simula uma tela que ja abriu a transacao e olhou os
+// inscritos antes de qualquer coisa mudar.
+Campeonato::listarInscricoes($pdo, $campeonatoInscricao);
+
+// $pdo2 continua em autocommit (aberta no cenario 2, ainda valida): este
+// INSERT ja fica commitado de verdade assim que executa, fora do alcance do
+// rollBack() de $pdo mais abaixo.
+$pdo2->prepare('INSERT INTO inscricoes (campeonato_id, jogador_id, nome_exibicao) VALUES (?, NULL, ?)')
+    ->execute([$campeonatoInscricao, 'Inscrito REPEATABLE READ 8 (segunda conexao)']);
+
+$erroInscricao = null;
+try {
+    Campeonato::inscrever($pdo, $campeonatoInscricao, 'Inscrito REPEATABLE READ 9 (deveria ser recusado)', null);
+} catch (RuntimeException $excecao) {
+    $erroInscricao = $excecao->getMessage();
+}
+Teste::igual(
+    'O campeonato ja tem 8 competidores.',
+    $erroInscricao,
+    'inscrever recusa o 9o competidor mesmo com uma leitura comum anterior na mesma transacao (contagem travada ve o commit alheio)'
+);
+
+// Se inscrever() recusou (o esperado), nada foi escrito por $pdo nesta
+// transacao, e o rollback so libera a trava. Se inscrever() NAO recusou (a
+// guarda falhou), a insercao do 9o competidor ficou pendente, sem commit,
+// dentro desta mesma transacao: um rollback aqui a desfaria e esconderia o
+// problema, fazendo a contagem final mostrar 8 mesmo quando a guarda
+// deixou passar um 9o. Por isso o commit e condicional: so um commit (ou a
+// ausencia de qualquer escrita, quando a guarda funcionou) deixa a
+// contagem final refletir o que de fato aconteceria numa transacao real de
+// quem chama, que commitaria ao terminar a requisicao.
+if ($erroInscricao === null) {
+    $pdo->commit();
+} else {
+    $pdo->rollBack();
+}
+
+$contaFinalInscricao = $pdo->prepare('SELECT COUNT(*) FROM inscricoes WHERE campeonato_id = ?');
+$contaFinalInscricao->execute([$campeonatoInscricao]);
+Teste::igual(
+    8,
+    (int) $contaFinalInscricao->fetchColumn(),
+    'o campeonato termina com exatamente 8 competidores (os 7 originais mais o da segunda conexao), nunca 9'
+);
 
 $terminouDireito = true;
 exit(Teste::resumo());

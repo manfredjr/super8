@@ -75,7 +75,23 @@ final class Campeonato
         return $busca->fetchAll();
     }
 
-    public static function atualizar(PDO $pdo, int $id, array $dados): void
+    /**
+     * WHERE id = ? AND organizador_id = ? tanto na leitura travada quanto no
+     * UPDATE final: sem o filtro por dono aqui, atualizar() seria o unico
+     * escritor da classe sem defesa em profundidade contra acesso indevido,
+     * dependendo inteiramente de o controlador lembrar de chamar
+     * exigirDonoDoCampeonato antes (compare com removerInscricao e com o
+     * parametro de campeonato de Placar::gravar, que existem em parte pelo
+     * mesmo motivo).
+     *
+     * A leitura travada (SELECT status ... FOR UPDATE), e nao buscar(), segue
+     * o mesmo contrato de sortear()/inscrever()/Placar::gravar (campeonatos
+     * primeiro, sempre) e e tambem onde mora a checagem de "encerrado": um
+     * campeonato encerrado nao pode mais ser editado, senao mudar
+     * data_evento depois de encerrar moveria o evento para dentro ou para
+     * fora de um filtro de periodo no ranking acumulado.
+     */
+    public static function atualizar(PDO $pdo, int $campeonatoId, int $organizadorId, array $dados): void
     {
         $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160);
         $dataEvento = self::validarDataEvento($dados['data_evento'] ?? null);
@@ -84,10 +100,49 @@ final class Campeonato
         $descricao = trim((string) ($dados['descricao'] ?? ''));
         $descricao = $descricao === '' ? null : $descricao;
 
-        $comando = $pdo->prepare(
-            'UPDATE campeonatos SET nome = ?, data_evento = ?, local = ?, custo = ?, descricao = ? WHERE id = ?'
-        );
-        $comando->execute([$nome, $dataEvento, $local, $custo, $descricao, $id]);
+        $transacaoPropria = !$pdo->inTransaction();
+        if ($transacaoPropria) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $trava = $pdo->prepare('SELECT status FROM campeonatos WHERE id = ? AND organizador_id = ? FOR UPDATE');
+            $trava->execute([$campeonatoId, $organizadorId]);
+            $status = $trava->fetchColumn();
+            if ($status === false) {
+                // Nenhuma linha: o campeonato nao existe ou nao e deste
+                // organizador. As duas causas ficam atras da mesma mensagem,
+                // pelo mesmo motivo de exigirDonoDoCampeonato - nao dar a
+                // quem tenta editar um campeonato alheio um jeito de
+                // descobrir, pela diferenca de mensagem, se o id existe.
+                throw new RuntimeException('Campeonato nao encontrado.');
+            }
+            if ($status === 'encerrado') {
+                throw new RuntimeException('O campeonato esta encerrado e nao pode mais ser editado.');
+            }
+
+            $comando = $pdo->prepare(
+                'UPDATE campeonatos SET nome = ?, data_evento = ?, local = ?, custo = ?, descricao = ?
+                 WHERE id = ? AND organizador_id = ?'
+            );
+            $comando->execute([$nome, $dataEvento, $local, $custo, $descricao, $campeonatoId, $organizadorId]);
+            if ($comando->rowCount() === 0) {
+                // So chega aqui se a linha sumiu entre a leitura travada
+                // acima e este UPDATE - a propria trava deveria impedir
+                // isso, mas quem chama precisa de um jeito de distinguir
+                // "gravou" de "nao gravou" mesmo assim.
+                throw new RuntimeException('Campeonato nao encontrado.');
+            }
+
+            if ($transacaoPropria) {
+                $pdo->commit();
+            }
+        } catch (Throwable $erro) {
+            if ($transacaoPropria && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $erro;
+        }
     }
 
     public static function inscrever(PDO $pdo, int $campeonatoId, string $nomeExibicao, ?int $jogadorId): int

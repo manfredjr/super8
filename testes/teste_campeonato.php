@@ -518,7 +518,7 @@ Teste::igual('Validacao de entrada', $campeonatoValidacaoOk['nome'], 'C2: nome v
 // atualizar() passa pela mesma validacao que criar().
 $erroAtualizarCustoInvalido = null;
 try {
-    Campeonato::atualizar($pdo, $idValidacaoOk, ['custo' => 'de graca'] + $dadosBaseValidos);
+    Campeonato::atualizar($pdo, $idValidacaoOk, $organizadorId, ['custo' => 'de graca'] + $dadosBaseValidos);
 } catch (InvalidArgumentException $excecao) {
     $erroAtualizarCustoInvalido = $excecao->getMessage();
 }
@@ -572,6 +572,70 @@ try {
     $erroEncerrarInexistente = $excecao->getMessage();
 }
 Teste::verdade($erroEncerrarInexistente !== null, 'C1: encerrar com id inexistente lanca RuntimeException');
+
+// ============================================================================
+// I3 (Importante, rodada de revisao): depois de encerrado, o placar
+// historico e a data do evento nao podem mais mudar.
+// ============================================================================
+$erroGravarDepoisEncerrado = null;
+try {
+    Placar::gravar($pdo, $campeonatoEncerrarId, (int) $idsPartidasEncerrar[0], 6, 2, $organizadorId);
+} catch (RuntimeException $excecao) {
+    $erroGravarDepoisEncerrado = $excecao->getMessage();
+}
+Teste::verdade($erroGravarDepoisEncerrado !== null, 'I3: gravar placar depois de encerrado e recusado');
+
+$erroAtualizarDepoisEncerrado = null;
+try {
+    Campeonato::atualizar($pdo, $campeonatoEncerrarId, $organizadorId, [
+        'nome' => 'Tentando editar depois de encerrado', 'data_evento' => '2026-10-06',
+        'local' => 'Arena', 'custo' => '', 'descricao' => '',
+    ]);
+} catch (RuntimeException $excecao) {
+    $erroAtualizarDepoisEncerrado = $excecao->getMessage();
+}
+Teste::verdade($erroAtualizarDepoisEncerrado !== null, 'I3: atualizar o campeonato depois de encerrado e recusado');
+
+// ============================================================================
+// I2 (Importante, rodada de revisao): atualizar() agora filtra por dono, do
+// mesmo jeito que removerInscricao ja fazia.
+// ============================================================================
+$campeonatoAtualizarId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Antes de atualizar', 'data_evento' => '2026-10-10',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+Campeonato::atualizar($pdo, $campeonatoAtualizarId, $organizadorId, [
+    'nome' => 'Depois de atualizar', 'data_evento' => '2026-10-11',
+    'local' => 'Arena Nova', 'custo' => '75.50', 'descricao' => 'Atualizado',
+]);
+$campeonatoAtualizado = Campeonato::buscar($pdo, $campeonatoAtualizarId);
+Teste::igual('Depois de atualizar', $campeonatoAtualizado['nome'], 'I2: atualizar grava o nome novo quando o dono confere');
+Teste::igual('2026-10-11', $campeonatoAtualizado['data_evento'], 'I2: atualizar grava a data nova');
+
+$outroOrganizadorId = Auth::cadastrar($pdo, 'Outro Organizador', 'outroorg' . random_int(1000, 9999) . '@exemplo.com', 'senhaforte123');
+$erroAtualizarDonoErrado = null;
+try {
+    Campeonato::atualizar($pdo, $campeonatoAtualizarId, $outroOrganizadorId, [
+        'nome' => 'Tentativa de intruso', 'data_evento' => '2026-10-12',
+        'local' => '', 'custo' => '', 'descricao' => '',
+    ]);
+} catch (RuntimeException $excecao) {
+    $erroAtualizarDonoErrado = $excecao->getMessage();
+}
+Teste::verdade($erroAtualizarDonoErrado !== null, 'I2: atualizar com o organizador errado e recusado, nao grava por cima');
+$campeonatoAposIntruso = Campeonato::buscar($pdo, $campeonatoAtualizarId);
+Teste::igual('Depois de atualizar', $campeonatoAposIntruso['nome'], 'I2: o nome nao muda quando quem tenta atualizar nao e o dono');
+
+$erroAtualizarIdInexistente = null;
+try {
+    Campeonato::atualizar($pdo, 999999999, $organizadorId, [
+        'nome' => 'Nao existe', 'data_evento' => '2026-10-13',
+        'local' => '', 'custo' => '', 'descricao' => '',
+    ]);
+} catch (RuntimeException $excecao) {
+    $erroAtualizarIdInexistente = $excecao->getMessage();
+}
+Teste::verdade($erroAtualizarIdInexistente !== null, 'I2: atualizar com id inexistente lanca RuntimeException');
 
 $pdo->rollBack();
 

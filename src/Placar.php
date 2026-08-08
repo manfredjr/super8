@@ -69,10 +69,18 @@ final class Placar
         }
 
         try {
-            $trava = $pdo->prepare('SELECT id FROM campeonatos WHERE id = ? FOR UPDATE');
+            $trava = $pdo->prepare('SELECT status FROM campeonatos WHERE id = ? FOR UPDATE');
             $trava->execute([$campeonatoId]);
-            if ($trava->fetchColumn() === false) {
+            $status = $trava->fetchColumn();
+            if ($status === false) {
                 throw new RuntimeException('O campeonato informado nao existe.');
+            }
+            // Depois de encerrado, o placar historico nao pode mais mudar:
+            // o ranking acumulado ja contou este evento, e editar um game
+            // aqui reescreveria esse resultado retroativamente sem deixar
+            // rastro.
+            if ($status === 'encerrado') {
+                throw new RuntimeException('O campeonato esta encerrado e o placar nao pode mais ser alterado.');
             }
 
             $confirmaPartida = $pdo->prepare(

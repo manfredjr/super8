@@ -1,0 +1,3 @@
+# O destino e um VPS Linux. Todo arquivo de texto fica em LF, no repositorio e no disco,
+# para nao depender da configuracao de quem clonar.
+* text=auto eol=lf

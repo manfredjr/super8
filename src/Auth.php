@@ -16,6 +16,16 @@ final class Auth
     // nenhuma, so serve para pagar o mesmo custo computacional do caminho feliz.
     private const HASH_FALSO = '$argon2id$v=19$m=65536,t=4,p=1$Vno5a1Y5dHZtRUdvWHFlbQ$3jgaGSh1ZkeHgn9P8t826Hy1OrSmIZG+SHIpcAxnAVo';
 
+    /**
+     * Nao gerencia transacao nenhuma: esta funcao nao abre nem fecha
+     * transacao propria, diferente de registrarFalha/Campeonato::inscrever/
+     * Campeonato::sortear/Placar::gravar. Quem chama pode envolve-la numa
+     * transacao propria quando precisar, e no cadastro com aceite de termo
+     * quem chama DEVE envolver: a linha de users e a linha de aceites_termo
+     * (registrarAceite) precisam comitar juntas, ou a base legal em que o
+     * modelo de negocio se apoia pode faltar para uma conta que existe de
+     * verdade no banco.
+     */
     public static function cadastrar(PDO $pdo, string $nome, string $email, string $senha): int
     {
         $nome = trim($nome);
@@ -195,4 +205,36 @@ final class Auth
         return $linha === false ? null : $linha['bloqueado_ate'];
     }
 
+    /**
+     * Grava o aceite do termo de uso. Aceitar a mesma versao duas vezes nao
+     * e erro: a UNIQUE KEY uk_user_versao existe justamente para tornar isso
+     * idempotente, entao um 1062 aqui vira sucesso silencioso, do mesmo
+     * jeito que outros pontos do projeto tratam SQLSTATE 23000 esperado em
+     * vez de deixa-lo subir cru.
+     */
+    public static function registrarAceite(PDO $pdo, int $userId, string $versao, ?string $ip): void
+    {
+        $comando = $pdo->prepare(
+            'INSERT INTO aceites_termo (user_id, versao, aceito_em, ip) VALUES (?, ?, NOW(), ?)'
+        );
+        try {
+            $comando->execute([$userId, $versao, $ip]);
+        } catch (PDOException $excecao) {
+            if ($excecao->getCode() !== '23000') {
+                throw $excecao;
+            }
+        }
+    }
+
+    /** Devolve a versao aceita mais recente por este usuario, ou nulo se nenhuma. */
+    public static function versaoAceita(PDO $pdo, int $userId): ?string
+    {
+        $busca = $pdo->prepare(
+            'SELECT versao FROM aceites_termo WHERE user_id = ? ORDER BY aceito_em DESC, id DESC LIMIT 1'
+        );
+        $busca->execute([$userId]);
+        $linha = $busca->fetch();
+
+        return $linha === false ? null : $linha['versao'];
+    }
 }

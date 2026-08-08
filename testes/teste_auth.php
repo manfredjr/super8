@@ -245,6 +245,53 @@ try {
 
     Auth::limparFalhas($pdo, $email);
     Teste::igual(null, Auth::bloqueadoAte($pdo, $email), 'login certo limpa o bloqueio');
+
+    // ========================================================================
+    // I4 (Importante, rodada de revisao): registrarAceite/versaoAceita, e a
+    // prova de que cadastrar() + registrarAceite() comitam juntos quando quem
+    // chama envolve os dois na mesma transacao.
+    // ========================================================================
+    $emailAceite = 'aceite' . uniqid() . '@exemplo.com';
+    $idAceite = Auth::cadastrar($pdo, 'Aceite Termo', $emailAceite, 'senhaforte123');
+    Teste::igual(null, Auth::versaoAceita($pdo, $idAceite), 'usuario sem aceite devolve nulo');
+
+    Auth::registrarAceite($pdo, $idAceite, '1.0', '203.0.113.10');
+    Teste::igual('1.0', Auth::versaoAceita($pdo, $idAceite), 'gravar aceite e ler de volta devolve a versao gravada');
+
+    // Aceitar a mesma versao duas vezes nao e erro e nao duplica linha: a
+    // UNIQUE KEY uk_user_versao existe para tornar isso idempotente.
+    Auth::registrarAceite($pdo, $idAceite, '1.0', '203.0.113.10');
+    $contaAceites = $pdo->prepare('SELECT COUNT(*) AS c FROM aceites_termo WHERE user_id = ? AND versao = ?');
+    $contaAceites->execute([$idAceite, '1.0']);
+    Teste::igual(1, (int) $contaAceites->fetch()['c'], 'aceitar a mesma versao duas vezes nao lanca e nao duplica linha');
+
+    // Uma versao nova passa a ser a mais recente.
+    Auth::registrarAceite($pdo, $idAceite, '2.0', '203.0.113.10');
+    Teste::igual('2.0', Auth::versaoAceita($pdo, $idAceite), 'aceitar uma versao nova passa a ser a versao aceita mais recente');
+
+    // Atomicidade: cadastrar() nao gerencia transacao nenhuma (ver o docblock
+    // da funcao), entao quem chama precisa envolve-la numa transacao propria
+    // para a conta e o aceite comitarem juntos. Usa um SAVEPOINT na MESMA
+    // conexao/transacao principal deste arquivo, e nao uma segunda conexao:
+    // uma segunda conexao com sua propria transacao aberta ficaria travada
+    // esperando a transacao principal (que so fecha no finally, ao final do
+    // script) soltar o gap lock da UNIQUE KEY de users.email sob REPEATABLE
+    // READ - o mesmo motivo pelo qual sortear() usa SAVEPOINT quando ja
+    // existe uma transacao em andamento. ROLLBACK TO SAVEPOINT prova a
+    // mesma atomicidade que um rollback de transacao inteira provaria.
+    $emailAtomicidade = 'atomico' . uniqid() . '@exemplo.com';
+    $pdo->exec('SAVEPOINT teste_atomicidade_aceite');
+    $idAtomicidade = Auth::cadastrar($pdo, 'Atomico', $emailAtomicidade, 'senhaforte123');
+    Auth::registrarAceite($pdo, $idAtomicidade, '1.0', '127.0.0.1');
+    $pdo->exec('ROLLBACK TO SAVEPOINT teste_atomicidade_aceite');
+
+    $confereContaAtomicidade = $pdo->prepare('SELECT COUNT(*) AS c FROM users WHERE email = ?');
+    $confereContaAtomicidade->execute([$emailAtomicidade]);
+    Teste::igual(0, (int) $confereContaAtomicidade->fetch()['c'], 'I4: apos rollback, nem a conta sobra (cadastrar e registrarAceite comitam juntos)');
+
+    $confereAceiteAtomicidade = $pdo->prepare('SELECT COUNT(*) AS c FROM aceites_termo WHERE user_id = ?');
+    $confereAceiteAtomicidade->execute([$idAtomicidade]);
+    Teste::igual(0, (int) $confereAceiteAtomicidade->fetch()['c'], 'I4: apos rollback, o aceite tambem nao sobra');
 } finally {
     // As duas linhas de limpeza precisam estar no mesmo finally, e nesta
     // ordem: o rollBack() da transacao principal roda primeiro e libera

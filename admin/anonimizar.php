@@ -32,6 +32,6 @@ if ($id === null) {
     exit("Nenhuma conta com esse e-mail.\n");
 }
 
-echo "Conta {$id} anonimizada e desativada. As inscricoes desse titular ficaram sem vinculo de conta - o nome de "
-    . "exibicao e os placares de cada campeonato foram mantidos como historico do evento, e a conta some do "
-    . "ranking acumulado.\n";
+echo "Conta {$id} anonimizada e desativada. O nome de exibicao de cada inscricao desse titular virou um "
+    . "identificador anonimo e perdeu o vinculo com a conta; os placares de cada campeonato foram mantidos, e a "
+    . "conta some do ranking acumulado.\n";

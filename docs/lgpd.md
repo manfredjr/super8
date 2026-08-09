@@ -17,24 +17,44 @@ informando que o nome aparece no chaveamento, na classificacao e no ranking.
 C:\xampp\php\php.exe admin/anonimizar.php email@do.titular
 ```
 
-A rotina (`Auth::anonimizarPorEmail`, chamada por este script) faz duas coisas, na mesma transacao:
+A rotina (`Auth::anonimizarPorEmail`, chamada por este script) faz, na mesma transacao:
 
-1. Desfaz o vinculo de toda inscricao desse titular com a conta (`inscricoes.jogador_id` vira nulo em cada
-   campeonato em que ele jogou). E esse vinculo, nao o nome de exibicao, que faz o ranking acumulado somar o
-   titular entre eventos - uma inscricao sem `jogador_id` simplesmente para de entrar naquela soma.
-2. Troca nome, e-mail, senha e foto da conta por um identificador anonimo e desativa a conta.
+1. Troca o nome de exibicao de toda inscricao desse titular (em cada campeonato em que ele jogou) por um
+   identificador anonimo. E este campo - `inscricoes.nome_exibicao`, nao `users.nome` - que aparece de verdade
+   para qualquer competidor, no chaveamento e na classificacao do evento; `users.nome` nunca chega a uma tela
+   que o competidor veja. E o que o termo de uso (secao 6) e a politica de privacidade prometem: "seu nome e
+   substituido por um identificador anonimo".
+2. Desfaz o vinculo de toda inscricao desse titular com a conta (`inscricoes.jogador_id` vira nulo). E esse
+   vinculo, nao o nome, que faz o ranking acumulado somar o titular entre eventos - uma inscricao sem
+   `jogador_id` simplesmente para de entrar naquela soma. Acontece DEPOIS do passo 1 de proposito: e o
+   `jogador_id` que acha as linhas certas para renomear, e apaga-lo primeiro deixaria o passo 1 sem nada para
+   achar.
+3. Limpa a linha de `tentativas_login` desse e-mail, se houver. Sem isso o e-mail do titular sobrevive em texto
+   puro numa tabela que a exclusao deveria alcancar tambem.
+4. Troca nome, e-mail, senha e foto da conta por um identificador anonimo e desativa a conta.
 
-O nome de exibicao gravado em cada campeonato na hora da inscricao NAO muda: a partir da exclusao ele passa a
-ser so o historico do proprio evento, o mesmo status que um convidado sem conta sempre teve. Os placares
-tambem ficam, porque deixam de ter qualquer ligacao com uma conta identificavel. Resultado pratico: um
-campeonato ja encerrado continua com a classificacao e os games de sempre, mas o titular some do ranking
-acumulado e da propria lista de contas ativas.
+Os placares ficam exatamente como estavam, porque `partidas` aponta para o id da inscricao, nunca para
+`jogador_id` nem para o nome - o resultado das partidas nunca teve qualquer um dos dois como chave. Resultado
+pratico: um campeonato ja encerrado continua com os games de sempre, mas o nome do titular some da tela do
+proprio evento e a pessoa some do ranking acumulado e da lista de contas ativas.
 
-Nenhuma linha e apagada em lugar nenhum, em nenhum dos dois passos - so atualizada.
+Nenhuma linha e apagada em lugar nenhum, em nenhum dos quatro passos - so atualizada.
+
+### Cuidado ao anonimizar quem tambem e organizador
+
+Toda conta criada no sistema e organizadora (nao ha outro tipo de conta nesta etapa). Se o titular anonimizado
+tambem organizou campeonatos proprios, esses campeonatos nao perdem dado nenhum, mas ficam inacessiveis por
+dentro do produto: `exigirDonoDoCampeonato` so mostra um campeonato para quem esta logado como o proprio
+organizador, e a conta anonimizada nunca mais consegue entrar (a senha foi apagada e `ativo` virou 0). Ninguem -
+nem o antigo organizador, nem outro organizador, nem o operador pela tela - consegue mais abrir o chaveamento ou
+a classificacao daquele campeonato depois disso, mesmo que as linhas continuem no banco. Antes de rodar a
+exclusao, confira se o titular tambem organizou campeonato proprio e avise quem for afetado, porque essa parte
+do historico deixa de ser alcancavel por qualquer tela do sistema.
 
 ## Retencao
 
-Dados de campeonato ficam enquanto o organizador mantiver a conta ativa.
+Dados de campeonato ficam enquanto o organizador mantiver a conta ativa - mas ver a ressalva acima: uma conta de
+organizador anonimizada tira o acesso aos proprios campeonatos, mesmo com os dados ainda no banco.
 Nao ha compartilhamento com terceiros nem uso para publicidade.
 
 ## Pendencia da etapa 2

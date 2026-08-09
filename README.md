@@ -60,7 +60,7 @@ powershell -ExecutionPolicy Bypass -File ferramentas\montar-pacote.ps1
 
 Roda a suite primeiro e aborta se algum teste falhar, porque descobrir isso depois do FTP custa muito mais. Monta `_PUBLICAR\enviar` e retira o `config.php` local do pacote, para que as credenciais de desenvolvimento nao subam nem sobrescrevam as de producao.
 
-No servidor faltam tres passos, que o script lembra ao terminar: criar o `config/config.php` a partir do exemplo com `COOKIE_SEGURO = true`, rodar o `sql/schema.sql` no banco de producao, e apontar o DocumentRoot para a pasta `public`.
+No servidor faltam tres passos, que o script lembra ao terminar: criar o `config/config.php` a partir do exemplo com `COOKIE_SEGURO = true`, rodar o `sql/schema.sql` no banco de producao, e apontar o DocumentRoot (ou o alias, se o servidor usar alias em vez de DocumentRoot) direto para a pasta `public` - nunca para a raiz do pacote. Apontar para a raiz serve `config/` e `sql/` como arquivo de texto cru para quem souber a URL; foi assim que a copia de teste deste projeto serviu `sql/schema.sql` por engano antes dessa checagem existir.
 
 ## Como o codigo esta organizado
 

@@ -74,11 +74,13 @@ $organizadorId = Auth::cadastrar($pdo, 'Organizador Anon', "orgnaon{$sufixo}@exe
 // ============================================================================
 // Cenario central: um titular com conta joga em DOIS campeonatos diferentes,
 // os dois ja ENCERRADOS - o caso normal desde que inscreverComEmail passou a
-// vincular conta de verdade (tarefa 15). Cobre exatamente o que a exclusao
-// precisa provar: o titular sai do ranking acumulado, mas cada campeonato
-// mantem historico (nome de exibicao e placar) intacto, e sem violar a
-// UNIQUE KEY uk_camp_jogador (campeonato_id, jogador_id) ao zerar jogador_id
-// nos dois campeonatos na mesma transacao.
+// vincular conta de verdade (tarefa 15). Cobre exatamente o que a
+// especificacao, o termo de uso e a politica de privacidade prometem juntos:
+// o nome de exibicao de cada inscricao vira um identificador anonimo, o
+// titular sai do ranking acumulado, os placares de cada campeonato ja
+// encerrado ficam exatamente iguais, e nada disso viola a UNIQUE KEY
+// uk_camp_jogador (campeonato_id, jogador_id) ao zerar jogador_id nos dois
+// campeonatos na mesma transacao.
 // ============================================================================
 $emailTitular = "titularanon{$sufixo}@exemplo.com";
 $jogadorTitularId = Auth::cadastrar($pdo, 'Titular Original', $emailTitular, 'senhaforte123');
@@ -116,9 +118,23 @@ foreach ($linhasAntes as $linha) {
 Teste::verdade($linhaAntes !== null, 'checagem do proprio teste: o titular aparece no ranking acumulado antes da exclusao');
 Teste::igual(2, (int) $linhaAntes['eventos'], 'checagem do proprio teste: os 2 campeonatos encerrados contam para o titular antes da exclusao');
 
+// Uma tentativa de login errada antes da exclusao, para provar que a linha de
+// tentativas_login (que guarda o e-mail do titular em TEXTO PURO) some junto -
+// sem isso ela sobrevive a exclusao inteira e so some se uma falha de login
+// FUTURA contra o mesmo e-mail disparar a limpeza por idade, o que numa conta
+// que acabou de ser desativada pode ser nunca.
+Auth::registrarFalha($pdo, $emailTitular);
+$buscaTentativaAntes = $pdo->prepare('SELECT COUNT(*) FROM tentativas_login WHERE email = ?');
+$buscaTentativaAntes->execute([$emailTitular]);
+Teste::igual(1, (int) $buscaTentativaAntes->fetchColumn(), 'checagem do proprio teste: existe uma linha de tentativas_login para o e-mail do titular antes da exclusao');
+
 // --- A exclusao em si -------------------------------------------------------
 $idAnonimizado = Auth::anonimizarPorEmail($pdo, '  ' . strtoupper($emailTitular) . '  ');
 Teste::igual($jogadorTitularId, $idAnonimizado, 'anonimizarPorEmail devolve o id da conta, mesmo com espacos e maiusculas no e-mail (mesma normalizacao de autenticar/buscarPorEmailAtivo)');
+
+$buscaTentativaDepois = $pdo->prepare('SELECT COUNT(*) FROM tentativas_login WHERE email = ?');
+$buscaTentativaDepois->execute([$emailTitular]);
+Teste::igual(0, (int) $buscaTentativaDepois->fetchColumn(), 'a linha de tentativas_login com o e-mail do titular em texto puro some junto com a exclusao');
 
 // --- inscricoes.jogador_id foi zerado nos DOIS campeonatos, sem violar a UNIQUE KEY ---
 $buscaJogadorIdA = $pdo->prepare('SELECT jogador_id FROM inscricoes WHERE id = ?');
@@ -129,21 +145,24 @@ $buscaJogadorIdB = $pdo->prepare('SELECT jogador_id FROM inscricoes WHERE id = ?
 $buscaJogadorIdB->execute([$inscricaoB['id']]);
 Teste::igual(null, $buscaJogadorIdB->fetch()['jogador_id'], 'a inscricao do campeonato B tambem perde o vinculo (as duas linhas em NULL nao colidem entre si na UNIQUE KEY)');
 
-// --- nome_exibicao de cada campeonato NAO muda: e o historico do proprio evento ---
+// --- nome_exibicao de cada campeonato VIRA o identificador anonimo: e o que
+// o competidor de fato ve no chaveamento e na classificacao, nao users.nome ---
+$apelidoEsperado = 'Jogador removido ' . $jogadorTitularId;
+
 $buscaNomeA = $pdo->prepare('SELECT nome_exibicao FROM inscricoes WHERE id = ?');
 $buscaNomeA->execute([$inscricaoA['id']]);
 Teste::igual(
-    $inscricaoA['nome_exibicao'],
+    $apelidoEsperado,
     $buscaNomeA->fetch()['nome_exibicao'],
-    'o nome de exibicao no campeonato A continua o mesmo que o organizador digitou, sem virar apelido anonimo'
+    'o nome de exibicao no campeonato A vira o identificador anonimo, do jeito que o termo de uso promete'
 );
 
 $buscaNomeB = $pdo->prepare('SELECT nome_exibicao FROM inscricoes WHERE id = ?');
 $buscaNomeB->execute([$inscricaoB['id']]);
 Teste::igual(
-    $inscricaoB['nome_exibicao'],
+    $apelidoEsperado,
     $buscaNomeB->fetch()['nome_exibicao'],
-    'o nome de exibicao no campeonato B tambem continua intacto'
+    'o nome de exibicao no campeonato B tambem vira o identificador anonimo'
 );
 
 // --- Os placares sobrevivem exatamente iguais ------------------------------

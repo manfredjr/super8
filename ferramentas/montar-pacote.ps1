@@ -72,9 +72,26 @@ if (Test-Path $configPacote) {
     Write-Host 'config.php retirado do pacote e guardado em _LIXEIRA.'
 }
 
+# sql/seed_demo.sql tem senha de demonstracao escrita dentro (mesmo sendo so
+# de teste local). Se o DocumentRoot ou o alias do servidor apontar para a
+# raiz do pacote em vez de apontar direto para public/ - confirmado contra o
+# Apache deste projeto, que serve sql\*.sql cru - esse arquivo fica legivel
+# por qualquer um que adivinhe a URL. Sai do pacote pelo mesmo motivo e do
+# mesmo jeito que o config.php: schema.sql fica (precisa rodar em producao),
+# seed_demo.sql nao tem uso nenhum fora da maquina de desenvolvimento.
+$seedPacote = Join-Path $destino 'sql\seed_demo.sql'
+if (Test-Path $seedPacote) {
+    $lixeiraSeed = Join-Path $projeto ('_LIXEIRA\seed-demo-sql-removido-do-pacote-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Force -Path $lixeiraSeed | Out-Null
+    Move-Item -Path $seedPacote -Destination (Join-Path $lixeiraSeed 'seed_demo.sql') -Force
+    Write-Host 'seed_demo.sql retirado do pacote e guardado em _LIXEIRA (tem senha de demonstracao escrita dentro).'
+}
+
 Write-Host ''
 Write-Host 'Pacote montado. No servidor, faltam tres passos:'
 Write-Host '  1. Criar config/config.php a partir do exemplo, com as credenciais de producao'
 Write-Host '     e COOKIE_SEGURO = true.'
 Write-Host '  2. Rodar sql/schema.sql no banco de producao.'
-Write-Host '  3. Apontar o DocumentRoot ou o alias para a pasta public.'
+Write-Host '  3. Apontar o DocumentRoot (ou o alias, se for o caso) direto para a pasta'
+Write-Host '     public - nunca para a raiz do pacote. Apontar para a raiz serve os'
+Write-Host '     arquivos de config/ e sql/ como texto cru para quem souber a URL.'

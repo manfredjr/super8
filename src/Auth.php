@@ -282,26 +282,50 @@ final class Auth
      * podendo ser anonimizada). Unico chamador de producao e
      * admin/anonimizar.php, que so roda em linha de comando.
      *
-     * Desfaz o vinculo de toda inscricao deste titular com a conta ANTES de
-     * anonimizar, e nesta ordem: e inscricoes.jogador_id, nao
-     * inscricoes.nome_exibicao, que faz um titular ser somado em
-     * Ranking::acumulado (aquele metodo faz INNER JOIN de inscricoes com
-     * users por jogador_id e exige jogador_id IS NOT NULL) - uma linha com
-     * jogador_id nulo simplesmente para de entrar na soma, em qualquer
-     * campeonato. O nome_exibicao gravado na hora da inscricao NAO e tocado:
-     * fica exatamente como foi digitado, porque a partir desta chamada ele
-     * deixa de estar ligado a conta e passa a ser so o historico do proprio
-     * evento - o mesmo status que um convidado sem conta sempre teve. Por
-     * isso games, saldo e classificacao de um campeonato ja encerrado
-     * continuam intactos depois da exclusao, mesmo tendo o titular jogado
-     * nele.
+     * A especificacao (docs/especificacao), o termo de uso (views/termo.php,
+     * secao 6) e a politica de privacidade (views/privacidade.php) prometem
+     * as TRES coisas ao mesmo tempo, nao uma no lugar da outra: o nome de
+     * exibicao de cada inscricao troca por um identificador anonimo, e os
+     * placares permanecem. inscricoes.nome_exibicao, nao users.nome, e o
+     * campo que qualquer competidor ve de verdade (chaveamento,
+     * classificacao) - users.nome nunca aparece em tela nenhuma que o
+     * competidor acesse. Por isso as DUAS trocas acontecem, nesta ordem:
      *
-     * A UNIQUE KEY uk_camp_jogador (campeonato_id, jogador_id) nao impede o
-     * UPDATE que zera jogador_id: nem MariaDB nem o SQL padrao consideram
-     * dois NULL iguais numa chave unica, entao varias inscricoes do mesmo
-     * titular, em campeonatos diferentes (ou ate convidados ja com
-     * jogador_id nulo no mesmo campeonato), podem conviver com jogador_id
-     * NULL sem colidir entre si.
+     * 1. UPDATE inscricoes SET nome_exibicao = <apelido> WHERE jogador_id = <id>
+     * 2. UPDATE inscricoes SET jogador_id = NULL WHERE jogador_id = <id>
+     *
+     * A ordem importa: a segunda instrucao apaga o criterio (jogador_id) que
+     * a primeira usa para achar as linhas, entao trocar o nome DEPOIS de
+     * zerar o vinculo nao acharia mais nenhuma linha. E e o vinculo (passo
+     * 2), nao o nome (passo 1), que faz um titular ser somado em
+     * Ranking::acumulado (aquele metodo faz INNER JOIN de inscricoes com
+     * users por jogador_id e exige jogador_id IS NOT NULL) - por isso as
+     * duas trocas juntas cobrem as duas promessas: o nome some da tela do
+     * proprio evento (chaveamento, classificacao) E a pessoa some do ranking
+     * acumulado, enquanto os games de cada partida ja encerrada continuam
+     * exatamente os mesmos, porque partidas.dupla_* aponta para
+     * inscricoes.id, nunca para jogador_id.
+     *
+     * O apelido usa o id do usuario ('Jogador removido <id>'), unico por
+     * definicao: a UNIQUE KEY uk_camp_nome (campeonato_id, nome_exibicao) so
+     * colidiria se OUTRO competidor, no MESMO campeonato, ja estivesse
+     * cadastrado com essa string exata - praticamente impossivel, e se
+     * acontecer o UPDATE lanca, a transacao inteira reverte (nada fica pela
+     * metade) e o erro aparece no terminal para o administrador decidir. A
+     * UNIQUE KEY uk_camp_jogador (campeonato_id, jogador_id) nao impede o
+     * segundo UPDATE: nem MariaDB nem o SQL padrao consideram dois NULL
+     * iguais numa chave unica, entao varias inscricoes do mesmo titular, em
+     * campeonatos diferentes (ou ate convidados ja com jogador_id nulo no
+     * mesmo campeonato), podem conviver com jogador_id NULL sem colidir
+     * entre si.
+     *
+     * limparFalhas() roda dentro da mesma transacao, antes do e-mail da
+     * conta ser anulado: sem isso, uma linha de tentativas_login com o
+     * e-mail do titular em texto puro sobrevive a exclusao inteira, e so
+     * some se uma falha de login futura contra ESSE MESMO e-mail disparar a
+     * limpeza por idade (Auth::registrarFalha) - o que numa conta que
+     * acabou de ser desativada pode ser nunca, porque ninguem tenta mais
+     * entrar com aquele e-mail.
      *
      * Mesma forma de guarda de transacao das outras escritas do projeto: so
      * abre e fecha transacao propria quando nao ha nenhuma em andamento, e
@@ -332,7 +356,11 @@ final class Auth
             $id = (int) $id;
             $apelido = 'Jogador removido ' . $id;
 
+            $pdo->prepare('UPDATE inscricoes SET nome_exibicao = ? WHERE jogador_id = ?')->execute([$apelido, $id]);
             $pdo->prepare('UPDATE inscricoes SET jogador_id = NULL WHERE jogador_id = ?')->execute([$id]);
+
+            self::limparFalhas($pdo, $email);
+
             $pdo->prepare(
                 'UPDATE users SET nome = ?, email = NULL, senha_hash = NULL, google_id = NULL, foto_url = NULL, ativo = 0
                  WHERE id = ?'

@@ -87,7 +87,7 @@ try {
     $erroCampeonatoInexistente = $excecao->getMessage();
 }
 Teste::igual(
-    'O campeonato informado nao existe.',
+    'O campeonato informado não existe.',
     $erroCampeonatoInexistente,
     'gravar com id de campeonato inexistente lanca RuntimeException'
 );
@@ -106,7 +106,7 @@ try {
     $erroPartidaInexistente = $excecao->getMessage();
 }
 Teste::igual(
-    'A partida informada nao existe neste campeonato.',
+    'A partida informada não existe neste campeonato.',
     $erroPartidaInexistente,
     'gravar com id de partida inexistente lanca RuntimeException, em vez de um UPDATE silencioso de 0 linhas'
 );
@@ -151,7 +151,7 @@ try {
     $erroPartidaAlheia = $excecao->getMessage();
 }
 Teste::igual(
-    'A partida informada nao existe neste campeonato.',
+    'A partida informada não existe neste campeonato.',
     $erroPartidaAlheia,
     'gravar recusa uma partida que pertence a outro campeonato'
 );

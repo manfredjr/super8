@@ -8,12 +8,27 @@ $usuario = exigirLogin($pdo);
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $campeonato = null;
 $erro = null;
+$somenteLeitura = false;
 
 if ($id > 0) {
-    $campeonato = exigirDonoDoCampeonato($pdo, $id);
+    // Passa $usuario, ja carregado por exigirLogin() ali em cima: evita uma
+    // segunda consulta identica a users dentro de exigirDonoDoCampeonato.
+    $campeonato = exigirDonoDoCampeonato($pdo, $id, $usuario);
+
+    // Campeonato::atualizar ja recusa gravar um campeonato encerrado, mas
+    // recusar so no motor deixa a tela oferecer um formulario editavel e um
+    // botao Salvar que nunca vai funcionar: quem preenche os 5 campos so
+    // descobre a recusa depois de mandar, sem outra saida a nao ser
+    // abandonar a pagina. $somenteLeitura tira o botao da view antes disso,
+    // e cobre tanto quem chega pelo link da lista quanto quem entra direto
+    // pela URL com o id.
+    if ($campeonato['status'] === 'encerrado') {
+        $somenteLeitura = true;
+        $erro = 'Este campeonato está encerrado e não pode mais ser editado.';
+    }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$somenteLeitura) {
     csrf_conferir();
 
     $dados = [
@@ -53,6 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $titulo = $id > 0 ? 'Editar campeonato' : 'Novo campeonato';
 
 renderizar('campeonato_form', $titulo, [
-    'campeonato' => $campeonato,
-    'erro'       => $erro,
+    'campeonato'     => $campeonato,
+    'erro'           => $erro,
+    'somenteLeitura' => $somenteLeitura,
 ]);

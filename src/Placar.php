@@ -73,14 +73,14 @@ final class Placar
             $trava->execute([$campeonatoId]);
             $status = $trava->fetchColumn();
             if ($status === false) {
-                throw new RuntimeException('O campeonato informado nao existe.');
+                throw new RuntimeException('O campeonato informado não existe.');
             }
             // Depois de encerrado, o placar historico nao pode mais mudar:
             // o ranking acumulado ja contou este evento, e editar um game
             // aqui reescreveria esse resultado retroativamente sem deixar
             // rastro.
             if ($status === 'encerrado') {
-                throw new RuntimeException('O campeonato esta encerrado e o placar nao pode mais ser alterado.');
+                throw new RuntimeException('O campeonato está encerrado e o placar não pode mais ser alterado.');
             }
 
             $confirmaPartida = $pdo->prepare(
@@ -89,7 +89,7 @@ final class Placar
             );
             $confirmaPartida->execute([$partidaId, $campeonatoId]);
             if ($confirmaPartida->fetchColumn() === false) {
-                throw new RuntimeException('A partida informada nao existe neste campeonato.');
+                throw new RuntimeException('A partida informada não existe neste campeonato.');
             }
 
             $comando = $pdo->prepare(

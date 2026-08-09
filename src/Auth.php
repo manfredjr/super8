@@ -226,8 +226,8 @@ final class Auth
      */
     public static function registrarAceite(PDO $pdo, int $userId, string $versao, ?string $ip): void
     {
-        $versao = Validador::textoObrigatorio($versao, 20);
-        $ip = Validador::textoOpcional($ip, 45);
+        $versao = Validador::textoObrigatorio($versao, 20, 'a versão do termo');
+        $ip = Validador::textoOpcional($ip, 45, 'o IP');
 
         $comando = $pdo->prepare(
             'INSERT INTO aceites_termo (user_id, versao, aceito_em, ip) VALUES (?, ?, NOW(), ?)'

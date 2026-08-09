@@ -303,7 +303,7 @@ try {
     $erro = $excecao->getMessage();
 }
 Teste::igual(
-    'Ja existe um competidor com esse nome.',
+    'Já existe um competidor com esse nome.',
     $erro,
     'nome de exibicao duplicado gera RuntimeException com mensagem em portugues'
 );
@@ -367,7 +367,7 @@ try {
     $erro = $excecao->getMessage();
 }
 Teste::igual(
-    'Nao e possivel remover um competidor depois do sorteio.',
+    'Não é possível remover um competidor depois do sorteio.',
     $erro,
     'remover um competidor depois do sorteio gera RuntimeException com mensagem em portugues'
 );
@@ -412,7 +412,7 @@ try {
     $erroJogadorDuplicado = $excecao->getMessage();
 }
 Teste::igual(
-    'Este jogador ja esta inscrito neste campeonato.',
+    'Este jogador já está inscrito neste campeonato.',
     $erroJogadorDuplicado,
     'inscrever o mesmo jogador_id duas vezes no mesmo campeonato, com nomes diferentes, gera RuntimeException com mensagem propria (nao a de nome duplicado)'
 );
@@ -432,7 +432,7 @@ try {
     $erroNomeDuplicadoJ3 = $excecao->getMessage();
 }
 Teste::igual(
-    'Ja existe um competidor com esse nome.',
+    'Já existe um competidor com esse nome.',
     $erroNomeDuplicadoJ3,
     'nome duplicado continua com a mensagem de sempre, diferente da mensagem de jogador duplicado'
 );
@@ -456,7 +456,7 @@ try {
     $erroNomeAdversario = $excecao->getMessage();
 }
 Teste::igual(
-    'Ja existe um competidor com esse nome.',
+    'Já existe um competidor com esse nome.',
     $erroNomeAdversario,
     'um competidor chamado literalmente "uk_camp_jogador" ainda recebe a mensagem de NOME duplicado, nao a de jogador duplicado (a chave violada foi uk_camp_nome, o texto "uk_camp_jogador" so aparece dentro do valor)'
 );

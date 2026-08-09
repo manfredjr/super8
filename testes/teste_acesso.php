@@ -48,7 +48,7 @@ $idCampeonato = null;
 
 // exigirDonoDoCampeonato() (por dentro de exigirLogin()) roda EM PROCESSO no
 // caminho do dono, mais abaixo, e o caminho de rejeicao dela termina com
-// exit('Campeonato nao encontrado.'). exit() com string devolve codigo de
+// exit('Campeonato não encontrado.'). exit() com string devolve codigo de
 // saida 0, e testes/executar.php so olha o codigo de saida: se a checagem de
 // dono der errado por engano (por exemplo, um id trocado), o script para no
 // meio, sem rodar o resto das asserticoes, e o executar.php ainda assim
@@ -105,13 +105,27 @@ Teste::verdade(
 );
 unset($_SESSION['usuario']);
 
+// exigirDonoDoCampeonato aceita o usuario ja carregado como terceiro
+// parametro, para quem chama (um controlador que ja rodou exigirLogin por
+// conta propria) nao pagar uma segunda consulta identica a users. Precisa
+// devolver a mesma linha de campeonato que o caminho sem esse parametro
+// devolveu acima, e continuar recusando dono errado mesmo recebendo o
+// usuario pronto.
+$usuarioCarregado = ['id' => $idOrganizador1];
+$campeonatoLidoComUsuario = exigirDonoDoCampeonato($pdo, $idCampeonato, $usuarioCarregado);
+Teste::igual(
+    $idCampeonato,
+    (int) $campeonatoLidoComUsuario['id'],
+    'exigirDonoDoCampeonato com o usuario ja carregado devolve a mesma linha do campeonato'
+);
+
 $ajudante = __DIR__ . '/_ajuda_dono_campeonato.php';
 
 // Caminho de quem nao e dono: o campeonato existe, mas pertence a outra
 // pessoa.
 [$codigoIntruso, $saidaIntruso] = rodarAjudanteDono($ajudante, $idOrganizador2, $idCampeonato);
 Teste::verdade($codigoIntruso !== 0, 'quem nao e dono do campeonato e rejeitado');
-Teste::verdade(str_contains($saidaIntruso, 'Campeonato nao encontrado.'), 'a rejeicao mostra a mensagem generica');
+Teste::verdade(str_contains($saidaIntruso, 'Campeonato não encontrado.'), 'a rejeicao mostra a mensagem generica');
 Teste::verdade(str_contains($saidaIntruso, 'codigo_http=404'), 'a rejeicao usa 404, nao 403 (403 confirmaria que o id existe)');
 
 // Mesmo teste, mas o id nem existe. A resposta precisa ser identica a de
@@ -131,7 +145,7 @@ $pdo->prepare('UPDATE users SET ativo = 0 WHERE id = ?')->execute([$idOrganizado
 [$codigoDesativado, $saidaDesativado] = rodarAjudanteDono($ajudante, $idOrganizador1, $idCampeonato);
 Teste::verdade($codigoDesativado !== 0, 'dono desativado e rejeitado mesmo sendo dono de verdade do campeonato');
 Teste::verdade(
-    !str_contains($saidaDesativado, 'Campeonato nao encontrado.'),
+    !str_contains($saidaDesativado, 'Campeonato não encontrado.'),
     'a rejeicao de usuario desativado acontece dentro de exigirLogin, antes mesmo de chegar na checagem de dono'
 );
 Teste::verdade(!str_contains($saidaDesativado, 'dono confirmado'), 'usuario desativado nao recebe o campeonato');

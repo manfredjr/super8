@@ -32,15 +32,22 @@ final class Validador
      * valor limpo. Usa mb_strlen, nao strlen: o limite e de caracteres, nao
      * de bytes, senao um nome com acento seria recusado ou aceito pelo
      * motivo errado.
+     *
+     * $rotulo identifica o campo na mensagem de erro, em vez de um generico
+     * "este campo": um formulario de varios campos (o de campeonato tem
+     * cinco) nao pode devolver "Preencha este campo." sem dizer qual. Vai em
+     * portugues, com o artigo incluso e em minuscula ("o nome do
+     * campeonato", "a senha"), porque entra direto na frase "Informe {rotulo}.".
+     * Para a mensagem de tamanho, comMaiuscula() capitaliza a primeira letra.
      */
-    public static function textoObrigatorio(?string $valor, int $limite): string
+    public static function textoObrigatorio(?string $valor, int $limite, string $rotulo): string
     {
         $valor = trim((string) $valor);
         if ($valor === '') {
-            throw new InvalidArgumentException('Preencha este campo.');
+            throw new InvalidArgumentException("Informe {$rotulo}.");
         }
         if (mb_strlen($valor) > $limite) {
-            throw new InvalidArgumentException("Este campo pode ter no máximo {$limite} caracteres.");
+            throw new InvalidArgumentException(self::comMaiuscula($rotulo) . " pode ter no máximo {$limite} caracteres.");
         }
 
         return $valor;
@@ -49,18 +56,25 @@ final class Validador
     /**
      * Mesma regra de textoObrigatorio, mas string vazia (ou nula) vira nulo
      * em vez de erro: o campo e opcional, e o limite de tamanho so vale
-     * quando algo de fato foi informado.
+     * quando algo de fato foi informado. $rotulo segue a mesma regra:
+     * artigo incluso, em minuscula.
      */
-    public static function textoOpcional(?string $valor, int $limite): ?string
+    public static function textoOpcional(?string $valor, int $limite, string $rotulo): ?string
     {
         $valor = trim((string) $valor);
         if ($valor === '') {
             return null;
         }
         if (mb_strlen($valor) > $limite) {
-            throw new InvalidArgumentException("Este campo pode ter no máximo {$limite} caracteres.");
+            throw new InvalidArgumentException(self::comMaiuscula($rotulo) . " pode ter no máximo {$limite} caracteres.");
         }
 
         return $valor;
+    }
+
+    /** Primeira letra maiuscula, respeitando caracteres multibyte. */
+    private static function comMaiuscula(string $rotulo): string
+    {
+        return mb_strtoupper(mb_substr($rotulo, 0, 1)) . mb_substr($rotulo, 1);
     }
 }

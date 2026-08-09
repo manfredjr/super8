@@ -106,10 +106,19 @@ function exigirTermoAceito(PDO $pdo, array $usuario): void
     exit;
 }
 
-/** Confere que o campeonato existe e pertence a quem esta logado. */
-function exigirDonoDoCampeonato(PDO $pdo, int $campeonatoId): array
+/**
+ * Confere que o campeonato existe e pertence a quem esta logado.
+ *
+ * $usuario e opcional: quando o ponto de entrada ja chamou exigirLogin()
+ * antes (o caso comum - precisa do id do usuario para outra coisa na mesma
+ * pagina), passa o retorno direto aqui, e esta funcao nao consulta a linha
+ * de novo. Sem $usuario, chama exigirLogin() por conta propria, do jeito que
+ * sempre fez - quem ainda nao tem o usuario em maos continua funcionando
+ * sem precisar mudar nada.
+ */
+function exigirDonoDoCampeonato(PDO $pdo, int $campeonatoId, ?array $usuario = null): array
 {
-    $usuario = exigirLogin($pdo);
+    $usuario ??= exigirLogin($pdo);
 
     $busca = $pdo->prepare('SELECT * FROM campeonatos WHERE id = ? AND organizador_id = ?');
     $busca->execute([$campeonatoId, (int) $usuario['id']]);
@@ -117,7 +126,7 @@ function exigirDonoDoCampeonato(PDO $pdo, int $campeonatoId): array
 
     if ($campeonato === false) {
         http_response_code(404);
-        exit('Campeonato nao encontrado.');
+        exit('Campeonato não encontrado.');
     }
 
     return $campeonato;

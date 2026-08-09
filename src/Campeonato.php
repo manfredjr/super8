@@ -29,14 +29,14 @@ final class Campeonato
             return null;
         }
         if (!is_numeric($custo)) {
-            throw new InvalidArgumentException('Informe um custo valido, em numeros, ou deixe em branco.');
+            throw new InvalidArgumentException('Informe um custo válido, em números, ou deixe em branco.');
         }
         $numero = (float) $custo;
         if ($numero < 0) {
-            throw new InvalidArgumentException('O custo nao pode ser negativo.');
+            throw new InvalidArgumentException('O custo não pode ser negativo.');
         }
         if ($numero > 99999999.99) {
-            throw new InvalidArgumentException('O custo informado e maior do que o sistema aceita.');
+            throw new InvalidArgumentException('O custo informado é maior do que o sistema aceita.');
         }
 
         return (string) $custo;
@@ -47,7 +47,7 @@ final class Campeonato
     {
         $data = trim((string) $data);
         if (!Validador::dataValida($data)) {
-            throw new InvalidArgumentException('Informe uma data de evento valida, no formato AAAA-MM-DD.');
+            throw new InvalidArgumentException('Informe uma data de evento válida, no formato AAAA-MM-DD.');
         }
 
         return $data;
@@ -55,9 +55,9 @@ final class Campeonato
 
     public static function criar(PDO $pdo, int $organizadorId, array $dados): int
     {
-        $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160);
+        $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160, 'o nome do campeonato');
         $dataEvento = self::validarDataEvento($dados['data_evento'] ?? null);
-        $local = Validador::textoOpcional($dados['local'] ?? null, 160);
+        $local = Validador::textoOpcional($dados['local'] ?? null, 160, 'o local');
         $custo = self::validarCusto($dados['custo'] ?? null);
         $descricao = trim((string) ($dados['descricao'] ?? ''));
         $descricao = $descricao === '' ? null : $descricao;
@@ -107,9 +107,9 @@ final class Campeonato
      */
     public static function atualizar(PDO $pdo, int $campeonatoId, int $organizadorId, array $dados): void
     {
-        $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160);
+        $nome = Validador::textoObrigatorio($dados['nome'] ?? null, 160, 'o nome do campeonato');
         $dataEvento = self::validarDataEvento($dados['data_evento'] ?? null);
-        $local = Validador::textoOpcional($dados['local'] ?? null, 160);
+        $local = Validador::textoOpcional($dados['local'] ?? null, 160, 'o local');
         $custo = self::validarCusto($dados['custo'] ?? null);
         $descricao = trim((string) ($dados['descricao'] ?? ''));
         $descricao = $descricao === '' ? null : $descricao;
@@ -129,10 +129,10 @@ final class Campeonato
                 // pelo mesmo motivo de exigirDonoDoCampeonato - nao dar a
                 // quem tenta editar um campeonato alheio um jeito de
                 // descobrir, pela diferenca de mensagem, se o id existe.
-                throw new RuntimeException('Campeonato nao encontrado.');
+                throw new RuntimeException('Campeonato não encontrado.');
             }
             if ($status === 'encerrado') {
-                throw new RuntimeException('O campeonato esta encerrado e nao pode mais ser editado.');
+                throw new RuntimeException('O campeonato está encerrado e não pode mais ser editado.');
             }
 
             $comando = $pdo->prepare(
@@ -145,7 +145,7 @@ final class Campeonato
                 // acima e este UPDATE - a propria trava deveria impedir
                 // isso, mas quem chama precisa de um jeito de distinguir
                 // "gravou" de "nao gravou" mesmo assim.
-                throw new RuntimeException('Campeonato nao encontrado.');
+                throw new RuntimeException('Campeonato não encontrado.');
             }
 
             if ($transacaoPropria) {
@@ -165,7 +165,7 @@ final class Campeonato
         // aqui, o servidor (que nao roda em modo estrito) cortaria o nome em
         // silencio em vez de recusar, o mesmo bug ja corrigido em
         // Auth::cadastrar para o nome de usuario.
-        $nomeExibicao = Validador::textoObrigatorio($nomeExibicao, 120);
+        $nomeExibicao = Validador::textoObrigatorio($nomeExibicao, 120, 'o nome do competidor');
 
         // Trava a linha do campeonato para serializar inscricoes concorrentes:
         // sem isso, duas conexoes podem contar 7 inscritos ao mesmo tempo,
@@ -194,7 +194,7 @@ final class Campeonato
             $travaContagem = $pdo->prepare('SELECT COUNT(*) FROM inscricoes WHERE campeonato_id = ? FOR UPDATE');
             $travaContagem->execute([$campeonatoId]);
             if ((int) $travaContagem->fetchColumn() >= 8) {
-                throw new RuntimeException('O campeonato ja tem 8 competidores.');
+                throw new RuntimeException('O campeonato já tem 8 competidores.');
             }
 
             $comando = $pdo->prepare(
@@ -238,9 +238,9 @@ final class Campeonato
                 // cru, sem disfarcar o problema real.
                 if (($excecao->errorInfo[1] ?? null) === 1062) {
                     if (str_ends_with($excecao->errorInfo[2] ?? '', "for key 'uk_camp_jogador'")) {
-                        throw new RuntimeException('Este jogador ja esta inscrito neste campeonato.');
+                        throw new RuntimeException('Este jogador já está inscrito neste campeonato.');
                     }
-                    throw new RuntimeException('Ja existe um competidor com esse nome.');
+                    throw new RuntimeException('Já existe um competidor com esse nome.');
                 }
                 throw $excecao;
             }
@@ -310,7 +310,7 @@ final class Campeonato
                 // que um DELETE possa disparar, esta captura precisa ser
                 // estreitada do mesmo jeito que a de inscrever() foi.
                 if ($excecao->getCode() === '23000') {
-                    throw new RuntimeException('Nao e possivel remover um competidor depois do sorteio.');
+                    throw new RuntimeException('Não é possível remover um competidor depois do sorteio.');
                 }
                 throw $excecao;
             }
@@ -363,7 +363,7 @@ final class Campeonato
             $trava->execute([$campeonatoId]);
             $status = $trava->fetchColumn();
             if ($status === false) {
-                throw new RuntimeException('Campeonato nao encontrado.');
+                throw new RuntimeException('Campeonato não encontrado.');
             }
 
             // Encerrar duas vezes nao e erro: se ja estiver encerrado, nao ha
@@ -382,7 +382,7 @@ final class Campeonato
                 );
                 $travaPendentes->execute([$campeonatoId]);
                 if ((int) $travaPendentes->fetchColumn() > 0) {
-                    throw new RuntimeException('Ainda ha partidas sem placar lancado neste campeonato.');
+                    throw new RuntimeException('Ainda há partidas sem placar lançado neste campeonato.');
                 }
 
                 $encerra = $pdo->prepare("UPDATE campeonatos SET status = 'encerrado' WHERE id = ?");
@@ -494,7 +494,7 @@ final class Campeonato
             );
             $travaPlacar->execute([$campeonatoId]);
             if ((int) $travaPlacar->fetchColumn() > 0) {
-                throw new RuntimeException('Nao da para refazer o sorteio com placar ja lancado.');
+                throw new RuntimeException('Não dá para refazer o sorteio com placar já lançado.');
             }
 
             $semente = $semente ?? Sorteio::gerarSemente();

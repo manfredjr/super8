@@ -27,9 +27,23 @@ input:not([type="checkbox"]), select, textarea, button { min-height: 44px; }
 button { padding: .7rem 1rem; font-size: 1rem; border: 0; border-radius: 6px;
          background: var(--azul); color: #fff; cursor: pointer; }
 button.secundario { background: var(--cinza); color: var(--texto); }
+/* Mesma aparencia de button, para um link que precisa se comportar como
+   botao de acao (por exemplo "Novo campeonato"). Um <button> dentro de um
+   <a> e HTML invalido (conteudo interativo dentro de conteudo interativo) -
+   leitor de tela anuncia um botao que nao faz nada -, entao a marcacao certa
+   e um <a> so, com esta classe cuidando da aparencia. */
+.botao { display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
+         padding: .7rem 1rem; font-size: 1rem; border-radius: 6px;
+         background: var(--azul); color: #fff; text-decoration: none; cursor: pointer; }
 .tabela-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 th, td { padding: .5rem; border-bottom: 1px solid var(--borda); text-align: left; }
+/* Os links de acao da tabela (Editar, Competidores, Chaveamento,
+   Classificacao) sem isso medem so a altura da propria linha de texto,
+   bem abaixo dos 44px minimos que o projeto usa para input e botao por
+   causa do uso no celular na beira da quadra. inline-block deixa o
+   padding vertical contar para a altura clicavel/tocavel. */
+td a { display: inline-block; padding: .5rem 0; }
 .erro { padding: .75rem; border-radius: 6px; background: #fee2e2; color: #991b1b; }
 .aviso { padding: .75rem; border-radius: 6px; background: #fef9c3; color: #713f12; }
 .partida { border: 1px solid var(--borda); border-radius: 8px; padding: .75rem; margin-bottom: .75rem; }

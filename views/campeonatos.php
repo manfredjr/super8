@@ -7,7 +7,7 @@ $rotulos = [
     'encerrado'    => 'Encerrado',
 ];
 ?>
-<p><a href="campeonato.php"><button type="button">Novo campeonato</button></a></p>
+<p><a class="botao" href="campeonato.php">Novo campeonato</a></p>
 
 <?php if ($campeonatos === []): ?>
   <p>Você ainda não criou nenhum campeonato.</p>
@@ -22,7 +22,9 @@ $rotulos = [
           <td><?= e($campeonato['local']) ?></td>
           <td><?= e($rotulos[$campeonato['status']]) ?></td>
           <td>
-            <a href="campeonato.php?id=<?= (int) $campeonato['id'] ?>">Editar</a>
+            <?php if ($campeonato['status'] !== 'encerrado'): ?>
+              <a href="campeonato.php?id=<?= (int) $campeonato['id'] ?>">Editar</a>
+            <?php endif; ?>
             <a href="inscricoes.php?id=<?= (int) $campeonato['id'] ?>">Competidores</a>
             <a href="chaveamento.php?id=<?= (int) $campeonato['id'] ?>">Chaveamento</a>
             <a href="classificacao.php?id=<?= (int) $campeonato['id'] ?>">Classificação</a>

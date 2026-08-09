@@ -123,7 +123,7 @@ Teste::verdade(
     "a segunda chamada demorou para retornar, evidencia de concorrencia real e nao de sorte de timing (esperou {$duracaoBloqueio}s, o auxiliar segura por 2s)"
 );
 Teste::igual(
-    'O campeonato ja tem 8 competidores.',
+    'O campeonato já tem 8 competidores.',
     $erroCorrida,
     'depois de destravar, a segunda conexao ve a contagem ja atualizada e recusa a 9a inscricao'
 );
@@ -196,7 +196,7 @@ try {
     $erroPlacar = $excecao->getMessage();
 }
 Teste::igual(
-    'Nao da para refazer o sorteio com placar ja lancado.',
+    'Não dá para refazer o sorteio com placar já lançado.',
     $erroPlacar,
     'sortear recusa o redesenho mesmo com uma leitura comum anterior na mesma transacao (leitura travada ve o commit alheio)'
 );
@@ -249,7 +249,7 @@ try {
     $erroInscricao = $excecao->getMessage();
 }
 Teste::igual(
-    'O campeonato ja tem 8 competidores.',
+    'O campeonato já tem 8 competidores.',
     $erroInscricao,
     'inscrever recusa o 9o competidor mesmo com uma leitura comum anterior na mesma transacao (contagem travada ve o commit alheio)'
 );

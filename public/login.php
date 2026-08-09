@@ -13,7 +13,11 @@ $emailEntrar = '';
 $nomeCadastro = '';
 $emailCadastro = '';
 $versao = TERMO_VERSAO;
-$pdo = db();
+// dbSeguro(), e nao db() direto: aqui, fora de qualquer try, uma falha de
+// conexao (banco fora do ar, credencial errada) nao pode escapar como
+// PDOException crua - dbSeguro() ja trata isso e nunca deixa a excecao
+// escapar, entao esta linha e segura mesmo antes do bloco protegido abaixo.
+$pdo = dbSeguro();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_conferir();

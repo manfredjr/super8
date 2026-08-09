@@ -272,4 +272,82 @@ final class Auth
 
         return $linha === false ? null : $linha['versao'];
     }
+
+    /**
+     * Atende ao direito de exclusao da LGPD sem apagar nenhuma linha: a
+     * regra do projeto proibe DELETE de dado, entao a saida e anonimizar e
+     * desativar a conta. Devolve o id anonimizado, ou nulo quando nao existe
+     * conta nenhuma com esse e-mail (nao filtra por ativo = 1 como
+     * buscarPorEmailAtivo: uma conta ja desativada por outro motivo continua
+     * podendo ser anonimizada). Unico chamador de producao e
+     * admin/anonimizar.php, que so roda em linha de comando.
+     *
+     * Desfaz o vinculo de toda inscricao deste titular com a conta ANTES de
+     * anonimizar, e nesta ordem: e inscricoes.jogador_id, nao
+     * inscricoes.nome_exibicao, que faz um titular ser somado em
+     * Ranking::acumulado (aquele metodo faz INNER JOIN de inscricoes com
+     * users por jogador_id e exige jogador_id IS NOT NULL) - uma linha com
+     * jogador_id nulo simplesmente para de entrar na soma, em qualquer
+     * campeonato. O nome_exibicao gravado na hora da inscricao NAO e tocado:
+     * fica exatamente como foi digitado, porque a partir desta chamada ele
+     * deixa de estar ligado a conta e passa a ser so o historico do proprio
+     * evento - o mesmo status que um convidado sem conta sempre teve. Por
+     * isso games, saldo e classificacao de um campeonato ja encerrado
+     * continuam intactos depois da exclusao, mesmo tendo o titular jogado
+     * nele.
+     *
+     * A UNIQUE KEY uk_camp_jogador (campeonato_id, jogador_id) nao impede o
+     * UPDATE que zera jogador_id: nem MariaDB nem o SQL padrao consideram
+     * dois NULL iguais numa chave unica, entao varias inscricoes do mesmo
+     * titular, em campeonatos diferentes (ou ate convidados ja com
+     * jogador_id nulo no mesmo campeonato), podem conviver com jogador_id
+     * NULL sem colidir entre si.
+     *
+     * Mesma forma de guarda de transacao das outras escritas do projeto: so
+     * abre e fecha transacao propria quando nao ha nenhuma em andamento, e
+     * trava a linha de users primeiro (FOR UPDATE) para serializar contra
+     * uma segunda chamada concorrente com o mesmo e-mail.
+     */
+    public static function anonimizarPorEmail(PDO $pdo, string $email): ?int
+    {
+        $email = strtolower(trim($email));
+
+        $transacaoPropria = !$pdo->inTransaction();
+        if ($transacaoPropria) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $trava = $pdo->prepare('SELECT id FROM users WHERE email = ? FOR UPDATE');
+            $trava->execute([$email]);
+            $id = $trava->fetchColumn();
+
+            if ($id === false) {
+                if ($transacaoPropria) {
+                    $pdo->commit();
+                }
+                return null;
+            }
+
+            $id = (int) $id;
+            $apelido = 'Jogador removido ' . $id;
+
+            $pdo->prepare('UPDATE inscricoes SET jogador_id = NULL WHERE jogador_id = ?')->execute([$id]);
+            $pdo->prepare(
+                'UPDATE users SET nome = ?, email = NULL, senha_hash = NULL, google_id = NULL, foto_url = NULL, ativo = 0
+                 WHERE id = ?'
+            )->execute([$apelido, $id]);
+
+            if ($transacaoPropria) {
+                $pdo->commit();
+            }
+
+            return $id;
+        } catch (Throwable $erro) {
+            if ($transacaoPropria && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $erro;
+        }
+    }
 }

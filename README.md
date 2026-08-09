@@ -40,7 +40,7 @@ O `config/config.php` guarda as credenciais e fica fora do controle de versao de
 C:\xampp\php\php.exe testes\executar.php
 ```
 
-Roda a partir do projeto, nao da copia do XAMPP. Sao 13 arquivos de teste que rodam por linha de comando, sem navegador e sem servidor web. Alguns precisam do MySQL no ar, porque exercitam transacao e concorrencia de verdade, com dois processos disputando a mesma trava.
+Roda a partir do projeto, nao da copia do XAMPP. Sao 15 arquivos de teste que rodam por linha de comando, sem navegador e sem servidor web. Alguns precisam do MySQL no ar, porque exercitam transacao e concorrencia de verdade, com dois processos disputando a mesma trava.
 
 O runner julga cada arquivo pelo codigo de saida. Vale saber de uma armadilha do PHP que aparece varias vezes neste projeto: `exit('mensagem')` devolve codigo de saida zero, entao um teste que morre no meio passaria por aprovado. Os testes que podem alcancar um `exit` usam `register_shutdown_function` para forcar codigo diferente de zero.
 
@@ -67,7 +67,8 @@ No servidor faltam tres passos, que o script lembra ao terminar: criar o `config
 - `src/` guarda as regras. Nenhuma linha de HTML, nenhuma chamada de sessao ou de cabecalho. Cada arquivo recebe a conexao e os valores por parametro, o que e o que torna os testes de linha de comando possiveis.
 - `config/` guarda conexao, sessao, token CSRF, escape de saida e controle de acesso. E aqui que mora o codigo que legitimamente toca sessao e cabecalho.
 - `views/` guarda as telas, `public/` os pontos de entrada.
-- `sql/schema.sql` cria as sete tabelas.
+- `sql/schema.sql` cria as sete tabelas. `sql/seed_demo.sql` cadastra um organizador de demonstracao, so para uso local.
+- `admin/` guarda rotinas de administracao que so rodam por linha de comando, nunca expostas na web - hoje so `anonimizar.php`, a exclusao de conta a pedido do titular (ver `docs/lgpd.md`).
 - `testes/` roda tudo. Arquivos comecando com `_ajuda_` sao auxiliares chamados por subprocesso, e nao testes; o nome e proposital, porque o runner so recolhe `teste_*.php`.
 - `ferramentas/` guarda os scripts de sincronizacao e empacotamento.
 
@@ -79,3 +80,5 @@ No servidor faltam tres passos, que o script lembra ao terminar: criar o `config
 - `projeto-super8-padel.md` traz os requisitos originais do sistema.
 - `docs/especificacao/` traz o desenho da etapa: modelagem, decisoes de arquitetura com o motivo de cada uma, analise de seguranca, analise de LGPD e a lista dos limites aceitos.
 - `docs/plano/` traz o plano de implementacao tarefa por tarefa.
+- `docs/roteiro-teste.md` e o roteiro de teste de ponta a ponta, para rodar manualmente contra a aplicacao publicada.
+- `docs/lgpd.md` documenta o que o sistema guarda, a base legal de cada dado e como funciona a exclusao a pedido do titular.

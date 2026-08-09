@@ -782,9 +782,10 @@ Teste::igual(
 );
 
 // Caso 3: e-mail que nao bate com conta nenhuma recusa com
-// InvalidArgumentException, em vez de cadastrar como convidado em
-// silencio - um vinculo pedido que falha sem avisar e pior que uma recusa
-// clara.
+// RuntimeException (existir ou nao a conta so se sabe consultando o banco,
+// nao e engano de formato que quem digitou podia ter validado antes), em
+// vez de cadastrar como convidado em silencio - um vinculo pedido que falha
+// sem avisar e pior que uma recusa clara.
 $totalAntesRecusa = count(Campeonato::listarInscricoes($pdo, $campeonatoEmailId));
 $erroEmailInexistente = null;
 try {
@@ -794,12 +795,12 @@ try {
         'Tentativa Sem Conta',
         'naoexisteconta' . random_int(1000, 9999) . '@exemplo.com'
     );
-} catch (InvalidArgumentException $excecao) {
+} catch (RuntimeException $excecao) {
     $erroEmailInexistente = $excecao->getMessage();
 }
 Teste::verdade(
     $erroEmailInexistente !== null,
-    'inscreverComEmail: e-mail sem conta ativa recusa com InvalidArgumentException, nao cadastra como convidado em silencio'
+    'inscreverComEmail: e-mail sem conta ativa recusa com RuntimeException, nao cadastra como convidado em silencio'
 );
 Teste::igual(
     $totalAntesRecusa,
@@ -816,7 +817,7 @@ $pdo->prepare('UPDATE users SET ativo = 0 WHERE id = ?')->execute([$jogadorInati
 $erroContaInativa = null;
 try {
     Campeonato::inscreverComEmail($pdo, $campeonatoEmailId, 'Tentativa Conta Inativa', $emailInativoVinculo);
-} catch (InvalidArgumentException $excecao) {
+} catch (RuntimeException $excecao) {
     $erroContaInativa = $excecao->getMessage();
 }
 Teste::verdade(

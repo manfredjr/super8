@@ -92,3 +92,8 @@ $contagemPorPosicao = array_count_values($posicoes);
   nunca entra aqui: sem conta não há como garantir que dois convidados com o mesmo nome, em eventos
   diferentes, são a mesma pessoa.
 </p>
+
+<p class="nota-rodape">
+  O nome exibido aqui é o nome da conta, que pode ser diferente do nome de exibição usado na classificação
+  de um evento específico. Um mesmo jogador pode aparecer com nomes distintos nas duas telas.
+</p>

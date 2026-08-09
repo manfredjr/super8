@@ -272,12 +272,16 @@ final class Campeonato
      * E-mail em branco (string vazia depois do trim) inscreve como
      * convidado, jogador_id nulo, do jeito que inscrever() sempre fez.
      * E-mail preenchido que nao bate com nenhuma conta ATIVA recusa com
-     * InvalidArgumentException, em vez de cair para convidado em silencio:
-     * quem digitou um e-mail pediu vinculo com uma conta, e um vinculo que
-     * falha sem avisar e pior do que uma recusa clara. O mesmo jogador_id
-     * inscrito duas vezes no mesmo campeonato continua caindo na
-     * RuntimeException de sempre, dentro de inscrever() (UNIQUE KEY
-     * uk_camp_jogador).
+     * RuntimeException, em vez de cair para convidado em silencio: quem
+     * digitou um e-mail pediu vinculo com uma conta, e um vinculo que falha
+     * sem avisar e pior do que uma recusa clara. Nao e InvalidArgumentException
+     * porque o formato do e-mail em si nao e o problema (pode estar
+     * perfeitamente valido) - o que falta so se sabe consultando o banco, se
+     * existe ou nao uma conta ativa com esse endereco. E o mesmo raciocinio
+     * do e-mail duplicado em Auth::cadastrar: estado guardado recusando, nao
+     * engano de quem digitou. O mesmo jogador_id inscrito duas vezes no
+     * mesmo campeonato continua caindo na RuntimeException de sempre, dentro
+     * de inscrever() (UNIQUE KEY uk_camp_jogador).
      */
     public static function inscreverComEmail(PDO $pdo, int $campeonatoId, string $nomeExibicao, ?string $email): int
     {
@@ -287,7 +291,7 @@ final class Campeonato
         if ($email !== '') {
             $jogador = Auth::buscarPorEmailAtivo($pdo, $email);
             if ($jogador === null) {
-                throw new InvalidArgumentException(
+                throw new RuntimeException(
                     'Não existe conta ativa com esse e-mail. Deixe o campo de e-mail em branco para inscrever como convidado, sem acumular no ranking entre eventos.'
                 );
             }

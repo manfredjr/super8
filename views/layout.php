@@ -2,6 +2,7 @@
 /** @var string $titulo */
 /** @var string $conteudo */
 /** @var bool|null $marcaDiscreta */
+require_once __DIR__ . '/marca.php';
 ?>
 <!doctype html>
 <html lang="pt-br">
@@ -9,7 +10,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= e($titulo) ?> - Super 8</title>
-<link rel="stylesheet" href="css/estilo.css">
+<link rel="stylesheet" href="css/estilo.css?v=<?= e(VERSAO_ESTATICO) ?>">
 </head>
 <body>
 <header class="topo">
@@ -27,10 +28,10 @@
   <?= $conteudo ?>
 </main>
 <footer class="rodape">
-  <?php require __DIR__ . '/marca.php'; ?>
+  <?php marcaMt($marcaDiscreta ?? false); ?>
   <p class="rodape-links">
     <a href="termo.php">Termo de uso</a>
-    <a href="privacidade.php">Politica de privacidade</a>
+    <a href="privacidade.php">Política de privacidade</a>
   </p>
 </footer>
 </body>

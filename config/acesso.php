@@ -82,12 +82,23 @@ function exigirLogin(PDO $pdo): array
  * Fica separada de exigirLogin de proposito. Se fosse parte dela, a propria tela
  * de aceite, que tambem exige login, redirecionaria para si mesma para sempre.
  *
- * A comparacao e por igualdade e nunca por ordem: `versao` e texto, e como texto
- * '1.10' e menor que '1.9'.
+ * Confere se o PAR usuario+versao-em-vigor existe em aceites_termo, e nao se
+ * a versao mais recente aceita e igual a em vigor (Auth::versaoAceita). As
+ * duas parecem a mesma pergunta, mas nao sao: se o termo voltar de uma versao
+ * nova para uma antiga (a versao em vigor recuou, por exemplo de '1.1' de
+ * volta para '1.0' a pedido de revisao juridica), quem ja tinha aceitado
+ * '1.0' antes de '1.1' existir teria a versao mais recente aceita igual a
+ * '1.1' - diferente de '1.0' - e cairia num redirecionamento sem saida: a
+ * tela de aceite tentaria regravar '1.0', a UNIQUE KEY uk_user_versao
+ * recusaria por ja existir, e a versao mais recente aceita continuaria
+ * sendo '1.1' para sempre. Perguntar "esse par existe?" em vez de "qual foi
+ * o ultimo?" nao tem esse problema.
  */
 function exigirTermoAceito(PDO $pdo, array $usuario): void
 {
-    if (Auth::versaoAceita($pdo, (int) $usuario['id']) === TERMO_VERSAO) {
+    $busca = $pdo->prepare('SELECT 1 FROM aceites_termo WHERE user_id = ? AND versao = ? LIMIT 1');
+    $busca->execute([(int) $usuario['id'], TERMO_VERSAO]);
+    if ($busca->fetch() !== false) {
         return;
     }
 

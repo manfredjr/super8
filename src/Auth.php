@@ -35,17 +35,17 @@ final class Auth
             throw new InvalidArgumentException('Informe o nome.');
         }
         if (mb_strlen($nome) > 120) {
-            throw new InvalidArgumentException('O nome pode ter no maximo 120 caracteres.');
+            throw new InvalidArgumentException('O nome pode ter no máximo 120 caracteres.');
         }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw new InvalidArgumentException('E-mail invalido.');
+            throw new InvalidArgumentException('E-mail inválido.');
         }
         // A coluna users.email e VARCHAR(160). Sem essa checagem o banco corta o
         // endereco em silencio (o servidor nao roda em modo estrito), o cadastro
         // parece dar certo e o usuario nunca mais consegue entrar com o e-mail
         // que digitou.
         if (mb_strlen($email) > 160) {
-            throw new InvalidArgumentException('O e-mail pode ter no maximo 160 caracteres.');
+            throw new InvalidArgumentException('O e-mail pode ter no máximo 160 caracteres.');
         }
         if (mb_strlen($senha) < 8) {
             throw new InvalidArgumentException('A senha precisa de pelo menos 8 caracteres.');
@@ -57,7 +57,7 @@ final class Auth
             // Duplicidade e estado do banco que recusa a operacao, nao valor
             // mal formado que quem chama poderia ter validado sozinho: pela
             // regra do topo do arquivo, e RuntimeException.
-            throw new RuntimeException('Ja existe conta com esse e-mail.');
+            throw new RuntimeException('Já existe conta com esse e-mail.');
         }
 
         $insere = $pdo->prepare(
@@ -75,7 +75,7 @@ final class Auth
             // o e-mail duplicado, entao a mensagem continua a mesma do caminho
             // normal.
             if ($excecao->getCode() === '23000') {
-                throw new RuntimeException('Ja existe conta com esse e-mail.');
+                throw new RuntimeException('Já existe conta com esse e-mail.');
             }
             throw $excecao;
         }

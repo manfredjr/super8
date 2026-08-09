@@ -14,18 +14,27 @@
  * - destacada: classificacao e ranking, que circulam no grupo depois do
  *   torneio. E onde a publicidade de fato trabalha.
  *
- * Enquanto nao houver arquivo de logotipo, a marca e texto. Trocar por imagem
- * e mudar so este arquivo.
+ * E funcao, e nao um require solto, porque uma unica tela pode precisar das
+ * duas formas ao mesmo tempo - a classificacao, por exemplo, quer a marca
+ * discreta no rodape de sempre E a marca destacada acima da tabela. Uma
+ * variavel de escopo ambiente so da conta de uma forma por tela; a funcao
+ * aceita o argumento em cada chamada.
  *
- * @var bool $marcaDiscreta definido pelo ponto de entrada; ausente vale destacada
+ * Enquanto nao houver arquivo de logotipo, a marca e texto. Trocar por imagem
+ * e mudar so esta funcao.
  */
-$discreta = isset($marcaDiscreta) && $marcaDiscreta === true;
-?>
-<?php if ($discreta): ?>
-  <p class="marca-discreta">Apoio <strong>MT - Manfred Tecnologia</strong></p>
-<?php else: ?>
-  <div class="marca-apoio">
-    <span class="marca-rotulo">Apoio e patrocinio</span>
-    <strong class="marca-nome">MT - Manfred Tecnologia</strong>
-  </div>
-<?php endif; ?>
+function marcaMt(bool $discreta = false): void
+{
+    if ($discreta) {
+        ?>
+        <p class="apoio-discreta">Apoio <strong>MT - Manfred Tecnologia</strong></p>
+        <?php
+        return;
+    }
+    ?>
+    <div class="apoio-destacada">
+      <span class="apoio-rotulo">Apoio e patrocínio</span>
+      <strong class="apoio-nome">MT - Manfred Tecnologia</strong>
+    </div>
+    <?php
+}

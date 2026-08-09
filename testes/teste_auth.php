@@ -132,7 +132,7 @@ try {
     } catch (RuntimeException $excecao) {
         $erro = $excecao->getMessage();
     }
-    Teste::igual('Ja existe conta com esse e-mail.', $erro, 'corrida de cadastro: quem perde recebe a mesma mensagem de e-mail duplicado, nao um erro de banco cru');
+    Teste::igual('Já existe conta com esse e-mail.', $erro, 'corrida de cadastro: quem perde recebe a mesma mensagem de e-mail duplicado, nao um erro de banco cru');
 
     // Usuario com senha_hash nulo (por exemplo, cadastrado via login social)
     // nao pode autenticar por senha. password_verify(x, null) tambem devolve

@@ -4,6 +4,7 @@ require_once __DIR__ . '/../config/sessao.php';
 require_once __DIR__ . '/../config/csrf.php';
 require_once __DIR__ . '/../config/acesso.php';
 require_once __DIR__ . '/../config/db.php';
+require_once __DIR__ . '/../config/renderizar.php';
 require_once __DIR__ . '/../src/Validador.php';
 require_once __DIR__ . '/../src/Rodizio.php';
 require_once __DIR__ . '/../src/Sorteio.php';

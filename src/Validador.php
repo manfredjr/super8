@@ -40,7 +40,7 @@ final class Validador
             throw new InvalidArgumentException('Preencha este campo.');
         }
         if (mb_strlen($valor) > $limite) {
-            throw new InvalidArgumentException("Este campo pode ter no maximo {$limite} caracteres.");
+            throw new InvalidArgumentException("Este campo pode ter no máximo {$limite} caracteres.");
         }
 
         return $valor;
@@ -58,7 +58,7 @@ final class Validador
             return null;
         }
         if (mb_strlen($valor) > $limite) {
-            throw new InvalidArgumentException("Este campo pode ter no maximo {$limite} caracteres.");
+            throw new InvalidArgumentException("Este campo pode ter no máximo {$limite} caracteres.");
         }
 
         return $valor;

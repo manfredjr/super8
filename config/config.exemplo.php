@@ -15,3 +15,8 @@ const COOKIE_SEGURO = false;
 // A comparacao e por igualdade e nunca por ordem: como string, '1.10' e menor que
 // '1.9', e um numero de versao maior passaria por desatualizado.
 const TERMO_VERSAO = '1.0';
+
+// Chave de cache dos arquivos estaticos (css/js). Muda a cada alteracao de
+// public/css/estilo.css para o navegador buscar a versao nova em vez de
+// segurar a folha antiga em cache.
+const VERSAO_ESTATICO = '1';

@@ -553,6 +553,64 @@ try {
 Teste::verdade($erroAtualizarCustoInvalido !== null, 'C2: atualizar tambem recusa custo nao numerico');
 
 // ============================================================================
+// C3 (Critico, rodada de revisao da tarefa 14): um campeonato sem sorteio
+// nao tem partida nenhuma, entao a contagem de pendentes (que so conta
+// partida que EXISTE e esta faltando placar) e zero por definicao vazia -
+// sem uma guarda separada para "total de partidas zero", encerrar() aceitava
+// um campeonato assim, gravava 'encerrado', e o evento ficava travado para
+// sempre (atualizar() e Placar::gravar ja recusam qualquer coisa depois de
+// encerrado, e nao ha caminho de volta a nao ser recriar o campeonato do
+// zero e redigitar os 8 nomes).
+// ============================================================================
+$campeonatoSemSorteioId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Campeonato sem sorteio', 'data_evento' => '2026-10-04',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+
+$erroEncerrarSemInscritos = null;
+try {
+    Campeonato::encerrar($pdo, $campeonatoSemSorteioId);
+} catch (RuntimeException $excecao) {
+    $erroEncerrarSemInscritos = $excecao->getMessage();
+}
+Teste::igual(
+    'O campeonato ainda não foi sorteado; não há partidas para encerrar.',
+    $erroEncerrarSemInscritos,
+    'C3: encerrar recusa campeonato recem criado, sem nenhum inscrito, com a mensagem de "nao foi sorteado"'
+);
+Teste::igual(
+    'rascunho',
+    Campeonato::buscar($pdo, $campeonatoSemSorteioId)['status'],
+    'C3: a recusa acima nao muda o status do campeonato'
+);
+
+foreach (range(1, 8) as $numero) {
+    Campeonato::inscrever($pdo, $campeonatoSemSorteioId, "Sem sorteio {$numero}", null);
+}
+Teste::igual(
+    0,
+    Campeonato::partidasPendentes($pdo, $campeonatoSemSorteioId),
+    'C3: partidasPendentes() de um campeonato com 8 inscritos mas sem sorteio e 0 (nao ha partida nenhuma para contar) - e exatamente esse o ponto cego que a guarda de total zero dentro de encerrar() cobre, porque a contagem de pendentes sozinha nao basta'
+);
+
+$erroEncerrarComInscritosSemSorteio = null;
+try {
+    Campeonato::encerrar($pdo, $campeonatoSemSorteioId);
+} catch (RuntimeException $excecao) {
+    $erroEncerrarComInscritosSemSorteio = $excecao->getMessage();
+}
+Teste::igual(
+    'O campeonato ainda não foi sorteado; não há partidas para encerrar.',
+    $erroEncerrarComInscritosSemSorteio,
+    'C3: encerrar recusa mesmo com os 8 competidores completos, enquanto o sorteio nao rodar'
+);
+Teste::igual(
+    'rascunho',
+    Campeonato::buscar($pdo, $campeonatoSemSorteioId)['status'],
+    'C3: o campeonato continua em rascunho, nao fica travado como encerrado sem partida nenhuma'
+);
+
+// ============================================================================
 // C1 (Critico, rodada de revisao): Campeonato::encerrar e a UNICA transicao
 // para o status 'encerrado'. Ranking::acumulado filtra exatamente por esse
 // status - sem este metodo, nada no sistema fazia um evento contar no
@@ -567,6 +625,12 @@ foreach (range(1, 8) as $numero) {
 }
 Campeonato::sortear($pdo, $campeonatoEncerrarId, 5555);
 
+Teste::igual(
+    14,
+    Campeonato::partidasPendentes($pdo, $campeonatoEncerrarId),
+    'partidasPendentes() conta as 14 partidas recem-sorteadas, nenhuma com placar ainda'
+);
+
 $erroEncerrarPendente = null;
 try {
     Campeonato::encerrar($pdo, $campeonatoEncerrarId);
@@ -580,8 +644,15 @@ $buscaPartidasEncerrar = $pdo->prepare(
 );
 $buscaPartidasEncerrar->execute([$campeonatoEncerrarId]);
 $idsPartidasEncerrar = $buscaPartidasEncerrar->fetchAll(PDO::FETCH_COLUMN);
-foreach ($idsPartidasEncerrar as $partidaId) {
+foreach ($idsPartidasEncerrar as $indicePartida => $partidaId) {
     Placar::gravar($pdo, $campeonatoEncerrarId, (int) $partidaId, 6, 3, $organizadorId);
+
+    $restantes = count($idsPartidasEncerrar) - $indicePartida - 1;
+    Teste::igual(
+        $restantes,
+        Campeonato::partidasPendentes($pdo, $campeonatoEncerrarId),
+        "partidasPendentes() desce para {$restantes} depois de gravar o placar da partida " . ($indicePartida + 1)
+    );
 }
 
 Campeonato::encerrar($pdo, $campeonatoEncerrarId);

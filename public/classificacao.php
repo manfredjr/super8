@@ -12,36 +12,43 @@ $campeonato = exigirDonoDoCampeonato($pdo, $id, $usuario);
 
 $linhas = Placar::classificacao($pdo, $id);
 
-// Partida pendente: nem encerrada nem com nenhum dos dois games
-// preenchidos - a mesma condicao larga que Campeonato::encerrar usa, sob a
-// propria trava, para decidir se pode fechar o campeonato (contrato
-// documentado no docblock de Campeonato::encerrar). Contar do mesmo jeito
-// aqui e o que faz esta tela e o motor concordarem sobre o que falta: se a
-// conta divergisse (por exemplo so olhando encerrada = 0), a mensagem de
-// "faltam X partidas" podia dizer um numero e o motor recusar por outro
-// motivo.
-$contaPendentes = $pdo->prepare(
-    'SELECT COUNT(*) FROM partidas p JOIN rodadas r ON r.id = p.rodada_id
-     WHERE r.campeonato_id = ? AND p.encerrada = 0 AND p.games_a IS NULL AND p.games_b IS NULL'
-);
-$contaPendentes->execute([$id]);
-$pendentes = (int) $contaPendentes->fetchColumn();
+// Campeonato::partidasPendentes(), e nao uma consulta copiada aqui: e a
+// mesma contagem que Campeonato::encerrar faz sob a propria trava para
+// decidir se pode fechar o campeonato, so que sem trava (esta tela so
+// precisa saber o que MOSTRAR). Existir como metodo unico, chamado tanto
+// aqui quanto em encerrar.php, e o que impede as duas copias de divergirem
+// se a regra mudar um dia (achado "Importante 2" da rodada de revisao).
+$pendentes = Campeonato::partidasPendentes($pdo, $id);
+
+// Um campeonato sem sorteio nao tem partida nenhuma, entao $pendentes acima
+// da zero por definicao vazia (nao ha nada para contar) - nao pode ser lido
+// como "pronto para encerrar". seed_sorteio nao nulo e o mesmo sinal que
+// inscricoes.php ja usa como $jaSorteado: o sorteio grava a semente e cria
+// as 14 partidas na mesma transacao, entao os dois nascem e continuam
+// juntos. $temPartidas tira o botao da tela antes de oferecer uma acao que
+// Campeonato::encerrar ja recusa por dentro (achado "Critico" da rodada de
+// revisao: sem esta guarda em algum nivel, um campeonato de 8 inscritos sem
+// sorteio encerrava e ficava travado para sempre).
+$temPartidas = $campeonato['seed_sorteio'] !== null;
 
 // public/encerrar.php e um endpoint proprio, sem tela: quando ele recusa o
-// encerramento (partida pendente, campeonato ja encerrado) ou confirma um
-// sucesso, volta pra ca com a mensagem numa leitura de sessao de uso unico.
-// lerAviso() (config/renderizar.php) e o ajudante comum a esta tela e a
-// chaveamento.php/inscricoes.php.
+// encerramento (sem sorteio, partida pendente, campeonato ja encerrado) ou
+// confirma um sucesso, volta pra ca com a mensagem numa leitura de sessao
+// de uso unico. lerAviso() (config/renderizar.php) e o ajudante comum a
+// esta tela e a chaveamento.php/inscricoes.php.
 ['erro' => $erro, 'erroClasse' => $erroClasse] = lerAviso('avisoEncerramento', $id);
 
 // Tela que circula fora da quadra, no grupo, depois do torneio - e onde a
-// publicidade de fato trabalha (ver views/marca.php). Por isso renderizar()
-// e chamado sem a flag de marca discreta (o padrao ja e a marca destacada),
-// diferente de chaveamento.php e placar.php.
+// publicidade de fato trabalha (ver views/marca.php). marca.php documenta
+// que esta tela quer as DUAS formas ao mesmo tempo: a discreta no rodape de
+// sempre (por isso a flag `true` aqui, igual a chaveamento.php e
+// placar.php) E a destacada acima da tabela, que a propria view chama
+// embutida com marcaMt(false).
 renderizar('classificacao', 'Classificação de ' . $campeonato['nome'], [
-    'campeonato' => $campeonato,
-    'linhas'     => $linhas,
-    'pendentes'  => $pendentes,
-    'erro'       => $erro,
-    'erroClasse' => $erroClasse,
-]);
+    'campeonato'   => $campeonato,
+    'linhas'       => $linhas,
+    'pendentes'    => $pendentes,
+    'temPartidas'  => $temPartidas,
+    'erro'         => $erro,
+    'erroClasse'   => $erroClasse,
+], true);

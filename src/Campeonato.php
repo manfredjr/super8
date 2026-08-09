@@ -355,12 +355,52 @@ final class Campeonato
     }
 
     /**
+     * Conta partidas pendentes: nem encerrada, nem com nenhum dos dois games
+     * preenchidos. E a versao sem trava da mesma contagem que encerrar() faz
+     * sob a trava da linha do campeonato, para uso em dois lugares que so
+     * precisam decidir o que MOSTRAR (a tela de classificacao) ou fazer uma
+     * recusa rapida antes de gastar uma transacao inteira (encerrar.php) -
+     * nao para decidir se a escrita pode acontecer de verdade. A checagem
+     * que vale, a que trava a linha e impede a corrida entre "contar" e
+     * "escrever", continua vivendo dentro de encerrar(), como uma consulta
+     * separada: existir aqui como metodo publico so evita que a MESMA
+     * consulta fique copiada a mao em dois pontos de entrada diferentes,
+     * arriscando divergir se algum dia mudar em um lugar e nao no outro -
+     * exatamente o problema que motivou este metodo (achado "Importante 2"
+     * da rodada de revisao da tarefa 14).
+     */
+    public static function partidasPendentes(PDO $pdo, int $campeonatoId): int
+    {
+        $busca = $pdo->prepare(
+            'SELECT COUNT(*) FROM partidas p
+             JOIN rodadas r ON r.id = p.rodada_id
+             WHERE r.campeonato_id = ?
+               AND p.encerrada = 0 AND p.games_a IS NULL AND p.games_b IS NULL'
+        );
+        $busca->execute([$campeonatoId]);
+
+        return (int) $busca->fetchColumn();
+    }
+
+    /**
      * Encerra um campeonato: essa e a UNICA transicao para o status
      * 'encerrado', e Ranking::acumulado filtra exatamente por esse status,
      * entao e essa chamada que faz um evento passar a contar no ranking
      * acumulado entre eventos. Segue a mesma forma de guarda de transacao e
      * a mesma ordem de trava das outras escritas da classe (campeonatos
      * primeiro, sempre).
+     *
+     * Recusa quando o campeonato ainda nao tem partida nenhuma (nunca foi
+     * sorteado) e quando ainda ha partida sem placar - as duas contagens
+     * saem da MESMA consulta, sob a MESMA trava (achado "Critico" da rodada
+     * de revisao da tarefa 14: sem a primeira, um campeonato com 8 inscritos
+     * e zero partidas tinha zero pendentes por definicao vazia, encerrava, e
+     * ficava travado para sempre - atualizar() e Placar::gravar ja recusam
+     * qualquer coisa depois de encerrado, e nao existia caminho de volta a
+     * nao ser recriar o campeonato do zero e redigitar os 8 nomes). Encerrar
+     * e a unica transicao para 'encerrado', entao a guarda aqui fecha essa
+     * porta para qualquer chamador, presente ou futuro - a tela so espelha o
+     * resultado, nunca decide sozinha.
      */
     public static function encerrar(PDO $pdo, int $campeonatoId): void
     {
@@ -380,19 +420,31 @@ final class Campeonato
             // Encerrar duas vezes nao e erro: se ja estiver encerrado, nao ha
             // nada mais a fazer.
             if ($status !== 'encerrado') {
-                // Contagem travada da mesma condicao larga de
-                // temPlacarLancado, so que invertida: aqui queremos o que
-                // AINDA falta (partida nem encerrada nem com nenhum dos dois
-                // games preenchidos), nao o que ja foi lancado.
-                $travaPendentes = $pdo->prepare(
-                    'SELECT COUNT(*) FROM partidas p
+                // total e pendentes saem da MESMA consulta, sob a MESMA
+                // trava: total conta toda partida do campeonato (sorteada ou
+                // nao importa o estado), pendentes usa a mesma condicao
+                // larga de temPlacarLancado invertida (nem encerrada, nem os
+                // dois games preenchidos). SUM(...) sobre zero linhas
+                // devolve NULL, nao 0 - so importa quando total tambem e 0,
+                // caso em que a excecao de baixo dispara antes de qualquer
+                // coisa usar $pendentes.
+                $travaContagem = $pdo->prepare(
+                    'SELECT COUNT(*) AS total,
+                            SUM(CASE WHEN p.encerrada = 0 AND p.games_a IS NULL AND p.games_b IS NULL THEN 1 ELSE 0 END) AS pendentes
+                     FROM partidas p
                      JOIN rodadas r ON r.id = p.rodada_id
                      WHERE r.campeonato_id = ?
-                       AND p.encerrada = 0 AND p.games_a IS NULL AND p.games_b IS NULL
                      FOR UPDATE'
                 );
-                $travaPendentes->execute([$campeonatoId]);
-                if ((int) $travaPendentes->fetchColumn() > 0) {
+                $travaContagem->execute([$campeonatoId]);
+                $contagem = $travaContagem->fetch();
+                $total = (int) $contagem['total'];
+                $pendentes = (int) $contagem['pendentes'];
+
+                if ($total === 0) {
+                    throw new RuntimeException('O campeonato ainda não foi sorteado; não há partidas para encerrar.');
+                }
+                if ($pendentes > 0) {
                     throw new RuntimeException('Ainda há partidas sem placar lançado neste campeonato.');
                 }
 

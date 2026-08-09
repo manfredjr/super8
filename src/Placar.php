@@ -136,6 +136,13 @@ final class Placar
      * Funcao pura, sem banco, para poder ser testada por linha de comando.
      *
      * Ordem: games ganhos, saldo, vitorias, confronto direto, nome.
+     *
+     * Cada linha devolvida traz tambem 'chave_grupo' ("games|saldo|vitorias"
+     * da propria linha): duas linhas adjacentes com a mesma chave pertencem
+     * ao mesmo grupo de desempate que produziu 'empatado'. A tela de
+     * classificacao usa essa chave, em vez de remontar o mesmo criterio por
+     * conta propria, para saber quando repetir a posicao de um grupo
+     * empatado.
      */
     public static function classificarLinhas(array $inscricoes, array $partidas): array
     {
@@ -245,9 +252,19 @@ final class Placar
         // o grupo inteiro fica marcado como empatado, e a ordem que sobra do
         // usort() e so um jeito de mostrar as linhas, nunca uma classificacao
         // real entre elas.
+        // chave_grupo entra na linha devolvida (nao so numa variavel local
+        // deste metodo) porque a tela de classificacao precisa saber, sem
+        // recalcular por conta propria, quando duas linhas adjacentes
+        // pertencem ao mesmo grupo de desempate - e o que permite mostrar a
+        // MESMA posicao para um grupo empatado em vez de contar 3, 4, 5 como
+        // se houvesse ordem real. Se a view remontasse essa chave sozinha
+        // (repetindo "games|saldo|vitorias"), um criterio novo aqui dentro
+        // no futuro passaria a numerar posicao errado sem nenhum teste
+        // falhar - achado "Menor 4" da rodada de revisao da tarefa 14.
         $grupos = [];
         foreach ($linhas as $indice => $linha) {
             $chave = $linha['games'] . '|' . $linha['saldo'] . '|' . $linha['vitorias'];
+            $linhas[$indice]['chave_grupo'] = $chave;
             $grupos[$chave][] = $indice;
         }
 

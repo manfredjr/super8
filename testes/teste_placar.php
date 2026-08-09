@@ -477,6 +477,19 @@ Teste::verdade($porId[1001]['empatado'], '1001 fica marcado como empatado dentro
 Teste::verdade($porId[1002]['empatado'], '1002 fica marcado como empatado dentro do ciclo (bate 1003, mas perde para 1001)');
 Teste::verdade($porId[1003]['empatado'], '1003 fica marcado como empatado dentro do ciclo (bate 1001, mas perde para 1002)');
 
+// chave_grupo (achado "Menor 4" da rodada de revisao da tarefa 14): a view
+// de classificacao usa este campo, em vez de remontar "games|saldo|vitorias"
+// por conta propria, para saber quando repetir a posicao de um grupo
+// empatado. Os tres do ciclo compartilham a mesma chave; quem nao esta no
+// ciclo (games/saldo/vitorias diferentes) tem uma chave diferente.
+Teste::igual($porId[1001]['chave_grupo'], $porId[1002]['chave_grupo'], 'chave_grupo: os tres do ciclo compartilham a mesma chave (1001 e 1002)');
+Teste::igual($porId[1001]['chave_grupo'], $porId[1003]['chave_grupo'], 'chave_grupo: os tres do ciclo compartilham a mesma chave (1001 e 1003)');
+Teste::igual('8|0|1', $porId[1001]['chave_grupo'], 'chave_grupo segue o formato games|saldo|vitorias');
+Teste::verdade(
+    $porId[1001]['chave_grupo'] !== $porId[1004]['chave_grupo'],
+    'chave_grupo: quem tem games/saldo/vitorias diferentes (1004, que so joga 1 partida) fica com uma chave diferente da do ciclo'
+);
+
 // --- empatado com 3 ou mais jogadores: confronto ORDENA o grupo (nenhum
 // fica marcado) -------------------------------------------------------------
 // O contrario do ciclo acima: um grupo de 3 jogadores empatados em

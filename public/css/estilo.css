@@ -80,13 +80,16 @@ p.dupla strong { font-size: 1.3rem; }
    fica no rodape da propria tela, depois da rodada 7, para nao empurrar a
    rodada 1 para baixo numa tela usada em pe na beira da quadra. */
 .nota-rodape { margin-top: 1.5rem; font-size: .8rem; color: #71717a; }
-/* Vitorias de partida ganha peso visual de proposito: games ganhos decide a
-   classificacao antes de vitorias, entao um jogador com mais partidas
-   vencidas pode aparecer numa posicao pior que outro com menos - regra
-   correta, mas questionada na beira da quadra. Numero grande e em negrito
-   deixa essa conta visivel na propria tela, em vez de alguem fazer a conta
-   de cabeca e discutir sem o numero na frente. */
-.vitorias-destaque { font-weight: 700; font-size: 1.2rem; }
+/* Games e quem decide a posicao, entao recebe o peso visual mais forte da
+   tabela - o numero maior nesta coluna e literalmente o motivo da ordem.
+   Vitorias fica destacada tambem (achado da rodada de revisao: sem
+   nenhum destaque, a conta so aparece pra quem le a nota de rodape ate o
+   fim, e uma captura de tela cortada esconde essa nota), mas com peso
+   visivelmente menor que Games - se as duas competissem pelo mesmo peso, um
+   print cortado deixaria o numero de Vitorias parecendo o criterio que
+   decide, quando na verdade e Games quem decide. */
+.games-destaque { font-weight: 700; font-size: 1.3rem; }
+.vitorias-destaque { font-weight: 600; font-size: 1.05rem; }
 /* Selo pequeno ao lado da posicao, para "empate" nao competir com o numero
    da posicao (que continua sendo a informacao principal da celula). */
 .marca-empate { font-size: .7rem; font-weight: 400; color: #71717a; }

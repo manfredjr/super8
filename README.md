@@ -73,6 +73,9 @@ No servidor faltam tres passos, que o script lembra ao terminar: criar o `config
 
 ## Documentacao
 
+- `docs/analise/padelsuper8-analise.md` e o documento de analise: contexto, objetivos, regras de negocio
+  numeradas, requisitos funcionais e nao funcionais, exigencias legais e criterios de aceite. E por onde
+  comeca quem nunca viu o projeto.
 - `projeto-super8-padel.md` traz os requisitos originais do sistema.
 - `docs/especificacao/` traz o desenho da etapa: modelagem, decisoes de arquitetura com o motivo de cada uma, analise de seguranca, analise de LGPD e a lista dos limites aceitos.
 - `docs/plano/` traz o plano de implementacao tarefa por tarefa.

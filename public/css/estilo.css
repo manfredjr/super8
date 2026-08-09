@@ -49,6 +49,17 @@ td a { display: inline-block; padding: .625rem 0; }
 .erro { padding: .75rem; border-radius: 6px; background: #fee2e2; color: #991b1b; }
 .aviso { padding: .75rem; border-radius: 6px; background: #fef9c3; color: #713f12; }
 .partida { border: 1px solid var(--borda); border-radius: 8px; padding: .75rem; margin-bottom: .75rem; }
+.partida-quadra { margin: 0 0 .5rem; font-weight: 600; color: #52525b; }
+/* Uma dupla por linha, nome a esquerda e o campo/numero a direita, os dois
+   sempre visiveis juntos: e o que deixa "tocar nos dois campos" um
+   movimento so, sem rolar a tela entre um e outro. Sobrescreve o
+   display:grid do seletor "label" generico (que empilha rotulo em cima do
+   campo, pensado para os formularios de texto das outras telas). */
+.placar label.dupla, p.dupla { display: flex; align-items: center; justify-content: space-between;
+                                gap: .75rem; margin: 0 0 .5rem; font-size: 1rem; }
+.placar label.dupla:last-of-type, p.dupla:last-of-type { margin-bottom: .75rem; }
+.dupla-nome { flex: 1; }
+p.dupla strong { font-size: 1.3rem; }
 .placar input { width: 4rem; font-size: 1.3rem; text-align: center; }
 .documento { max-width: 700px; }
 .documento h2 { font-size: 1.1rem; margin-top: 1.5rem; }

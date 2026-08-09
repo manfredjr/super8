@@ -77,6 +77,22 @@ function getInteiro(string $chave, int $padrao = 0): int
     return (int) trim($valor);
 }
 
+/**
+ * Le um campo de $_GET como texto, nunca como array. Mesmo motivo de
+ * postTexto(): "periodo[]=x" e aceito pela sintaxe de query string por
+ * construcao, e um (string) direto sobre esse array emitiria "Array to
+ * string conversion" e devolveria o literal "Array", que passaria reto
+ * pelo switch de periodo em ranking.php e caberia sem erro num valor que
+ * ninguem digitou. is_string() fecha isso: qualquer coisa que nao seja
+ * string vira string vazia, e o switch cai no default do mesmo jeito que
+ * cairia para um periodo desconhecido de verdade.
+ */
+function getTexto(string $chave): string
+{
+    $valor = $_GET[$chave] ?? '';
+    return is_string($valor) ? $valor : '';
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf'])) {

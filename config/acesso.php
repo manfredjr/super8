@@ -76,6 +76,25 @@ function exigirLogin(PDO $pdo): array
     return $usuario;
 }
 
+/**
+ * Manda para a tela de aceite quem nao aceitou a versao em vigor do termo.
+ *
+ * Fica separada de exigirLogin de proposito. Se fosse parte dela, a propria tela
+ * de aceite, que tambem exige login, redirecionaria para si mesma para sempre.
+ *
+ * A comparacao e por igualdade e nunca por ordem: `versao` e texto, e como texto
+ * '1.10' e menor que '1.9'.
+ */
+function exigirTermoAceito(PDO $pdo, array $usuario): void
+{
+    if (Auth::versaoAceita($pdo, (int) $usuario['id']) === TERMO_VERSAO) {
+        return;
+    }
+
+    header('Location: aceite.php');
+    exit;
+}
+
 /** Confere que o campeonato existe e pertence a quem esta logado. */
 function exigirDonoDoCampeonato(PDO $pdo, int $campeonatoId): array
 {

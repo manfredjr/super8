@@ -9,3 +9,9 @@ const DB_SENHA = '';
 
 // Em producao, com HTTPS ativo, mudar para true.
 const COOKIE_SEGURO = false;
+
+// Versao do termo de uso em vigor. Quando o texto do termo mudar, esta constante
+// muda junto, e quem aceitou a versao anterior passa pela tela de aceite de novo.
+// A comparacao e por igualdade e nunca por ordem: como string, '1.10' e menor que
+// '1.9', e um numero de versao maior passaria por desatualizado.
+const TERMO_VERSAO = '1.0';

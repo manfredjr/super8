@@ -5,7 +5,7 @@ require __DIR__ . '/cabecalho.php';
 $pdo = dbSeguro();
 $usuario = exigirLogin($pdo);
 
-$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$id = getInteiro('id');
 // Passa $usuario, ja carregado por exigirLogin() ali em cima: evita uma
 // segunda consulta identica a users dentro de exigirDonoDoCampeonato.
 $campeonato = exigirDonoDoCampeonato($pdo, $id, $usuario);
@@ -42,11 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($jaSorteado) {
                 throw new RuntimeException('Não é possível remover um competidor depois do sorteio.');
             }
-            // ?? 0, nao so (int) direto: sem o valor padrao, forjar
-            // acao=remover sem inscricao_id lanca "Undefined array key",
-            // que vaza o caminho do servidor no aviso do PHP antes mesmo
-            // de chegar no catch.
-            Campeonato::removerInscricao($pdo, $id, (int) ($_POST['inscricao_id'] ?? 0));
+            // postInteiro(), nao (int) direto: mesma classe de furo do id de
+            // campeonato la em cima, so que em POST - "inscricao_id[]=x" ou
+            // "inscricao_id=abc" forjado passaria reto por um (int) direto e
+            // caia num id de linha plausivel, embora nunca digitado de verdade.
+            Campeonato::removerInscricao($pdo, $id, postInteiro('inscricao_id', 0));
         } else {
             // postTexto(), nao (string) ($_POST[...] ?? ''): um campo
             // enviado como array ("nome_exibicao[]=x") faz (string) emitir

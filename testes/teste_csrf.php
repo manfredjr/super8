@@ -27,6 +27,33 @@ Teste::igual('&#039;', e("'"), 'escapa apostrofo');
 Teste::igual('', e(null), 'nulo vira string vazia');
 Teste::igual('Joao &amp; Maria', e('Joao & Maria'), 'escapa e comercial');
 
+Teste::igual(-1, postInteiro('campo_ausente'), 'postInteiro: campo ausente volta o padrao (-1)');
+
+$_POST['campo_digitos'] = '42';
+Teste::igual(42, postInteiro('campo_digitos'), 'postInteiro: string de digitos vira inteiro');
+
+$_POST['campo_array'] = ['x'];
+Teste::igual(-1, postInteiro('campo_array'), 'postInteiro: array nao vira 1, cai no padrao');
+
+$_POST['campo_letras'] = 'abc';
+Teste::igual(-1, postInteiro('campo_letras'), 'postInteiro: string sem digito cai no padrao, nao vira 0 em silencio');
+
+$_POST['campo_zero'] = '0';
+Teste::igual(0, postInteiro('campo_zero'), 'postInteiro: "0" e um valor valido de verdade, nao cai no padrao');
+
+Teste::igual(0, postInteiro('campo_nunca_enviado', 0), 'postInteiro: padrao customizado e respeitado');
+
+$_GET['id_digitos'] = '17';
+Teste::igual(17, getInteiro('id_digitos'), 'getInteiro: string de digitos vira inteiro');
+
+$_GET['id_array'] = ['x'];
+Teste::igual(0, getInteiro('id_array'), 'getInteiro: array nao vira 1, cai no padrao 0');
+
+$_GET['id_letras'] = 'abc';
+Teste::igual(0, getInteiro('id_letras'), 'getInteiro: string sem digito cai no padrao, nao vira 0 disfarcado de id valido');
+
+Teste::igual(0, getInteiro('id_ausente'), 'getInteiro: campo ausente volta o padrao 0');
+
 $token = csrf_token();
 Teste::igual(64, strlen($token), 'o token tem 64 caracteres');
 Teste::igual($token, csrf_token(), 'o token se mantem na mesma sessao');

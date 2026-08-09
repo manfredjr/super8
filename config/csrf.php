@@ -55,6 +55,28 @@ function postInteiro(string $chave, int $padrao = -1): int
     return (int) trim($valor);
 }
 
+/**
+ * Le um campo de $_GET como inteiro, aceitando so uma string de digitos.
+ * Mesmo motivo de postInteiro(), a mesma classe de furo: (int) direto sobre
+ * um array nao vazio vira 1, e (int) direto sobre uma string que nao comeca
+ * com digito vira 0, as duas em silencio - um "id[]=x" ou "id=abc" forjado
+ * na URL passaria reto por um (int) direto e caia num id de linha plausivel,
+ * embora nunca digitado de verdade. $padrao default e 0, e nao -1 como em
+ * postInteiro(): todo id lido por aqui e id de linha (campeonato, partida),
+ * nunca um placar, e 0 ja e um id que nunca existe de verdade - basta para
+ * exigirDonoDoCampeonato()/o motor recusarem do jeito certo mais abaixo, sem
+ * precisar de uma faixa negativa reservada como a de postInteiro().
+ */
+function getInteiro(string $chave, int $padrao = 0): int
+{
+    $valor = $_GET[$chave] ?? null;
+    if (!is_string($valor) || !ctype_digit(trim($valor))) {
+        return $padrao;
+    }
+
+    return (int) trim($valor);
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf'])) {

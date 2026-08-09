@@ -5,7 +5,7 @@ require __DIR__ . '/cabecalho.php';
 $pdo = dbSeguro();
 $usuario = exigirLogin($pdo);
 
-$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$id = getInteiro('id');
 // Passa $usuario, ja carregado por exigirLogin() ali em cima: evita uma
 // segunda consulta identica a users dentro de exigirDonoDoCampeonato.
 $campeonato = exigirDonoDoCampeonato($pdo, $id, $usuario);

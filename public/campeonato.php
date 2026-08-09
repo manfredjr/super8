@@ -5,7 +5,7 @@ require __DIR__ . '/cabecalho.php';
 $pdo = dbSeguro();
 $usuario = exigirLogin($pdo);
 
-$id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$id = getInteiro('id');
 $campeonato = null;
 $erro = null;
 $somenteLeitura = false;

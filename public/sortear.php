@@ -17,7 +17,7 @@ csrf_conferir();
 
 $pdo = dbSeguro();
 $usuario = exigirLogin($pdo);
-$id = (int) ($_POST['id'] ?? 0);
+$id = postInteiro('id', 0);
 // Passa $usuario, ja carregado por exigirLogin() ali em cima: evita uma
 // segunda consulta identica a users dentro de exigirDonoDoCampeonato.
 exigirDonoDoCampeonato($pdo, $id, $usuario);

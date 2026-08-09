@@ -27,6 +27,7 @@ input:not([type="checkbox"]), select, textarea, button { min-height: 44px; }
 button { padding: .7rem 1rem; font-size: 1rem; border: 0; border-radius: 6px;
          background: var(--azul); color: #fff; cursor: pointer; }
 button.secundario { background: var(--cinza); color: var(--texto); }
+.tabela-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 th, td { padding: .5rem; border-bottom: 1px solid var(--borda); text-align: left; }
 .erro { padding: .75rem; border-radius: 6px; background: #fee2e2; color: #991b1b; }

@@ -22,14 +22,19 @@ $pdo = dbSeguro();
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_conferir();
     $acao = $_POST['acao'] ?? '';
-    $email = (string) ($_POST['email'] ?? '');
-    $senha = (string) ($_POST['senha'] ?? '');
+    // postTexto(), nao (string) ($_POST[...] ?? ''): o `??` cobre chave
+    // ausente, mas nao cobre um campo enviado como array ("email[]=x", por
+    // exemplo) - (string) sobre array emite "Array to string conversion",
+    // vaza o caminho do servidor no aviso, e devolve o literal "Array", que
+    // passaria reto pela autenticacao como se fosse um e-mail de verdade.
+    $email = postTexto('email');
+    $senha = postTexto('senha');
 
     // Repovoa o formulario que foi de fato enviado, para quem errar um campo
     // nao precisar redigitar os outros. Nunca a senha, e nunca marcar o
     // aceite de volta: aceite pre-marcado nao e aceite.
     if ($acao === 'cadastrar') {
-        $nomeCadastro = (string) ($_POST['nome'] ?? '');
+        $nomeCadastro = postTexto('nome');
         $emailCadastro = $email;
     } else {
         $emailEntrar = $email;

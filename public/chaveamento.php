@@ -20,19 +20,10 @@ $encerrado = $campeonato['status'] === 'encerrado';
 
 // public/placar.php e um endpoint proprio, sem tela: quando ele recusa um
 // placar (partida de outro campeonato, games fora da faixa, campeonato
-// encerrado), volta pra ca com a mensagem numa leitura de sessao de uso
-// unico, a mesma ideia do avisoSorteio de inscricoes.php/sortear.php. So
-// aceita o aviso se for deste mesmo campeonato - sem essa checagem, abrir
-// duas abas em campeonatos diferentes podia mostrar o aviso de um na tela
-// do outro. unset() sempre, tenha batido o id ou nao, pra nao deixar sobra
-// apontando pro campeonato errado.
-$erro = null;
-$erroClasse = 'erro';
-if (isset($_SESSION['avisoPlacar']) && ($_SESSION['avisoPlacar']['id'] ?? null) === $id) {
-    $erro = $_SESSION['avisoPlacar']['mensagem'];
-    $erroClasse = $_SESSION['avisoPlacar']['classe'] ?? 'aviso';
-}
-unset($_SESSION['avisoPlacar']);
+// encerrado) ou confirma um sucesso, volta pra ca com a mensagem numa
+// leitura de sessao de uso unico. lerAviso() (config/renderizar.php) e o
+// ajudante comum a esta tela e a inscricoes.php.
+['erro' => $erro, 'erroClasse' => $erroClasse] = lerAviso('avisoPlacar', $id);
 
 // Tela de operacao, usada em pe na beira da quadra. A marca fica discreta
 // aqui para nao roubar espaco do placar (ver views/marca.php).

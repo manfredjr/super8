@@ -8,7 +8,7 @@
 /** @var string $nomeDigitado */
 $total = count($inscricoes);
 ?>
-<?php if ($erro !== null): ?><p class="<?= $erroClasse ?>"><?= e($erro) ?></p><?php endif; ?>
+<?php if ($erro !== null): ?><p class="<?= e($erroClasse) ?>"><?= e($erro) ?></p><?php endif; ?>
 
 <p><?= $total ?> de 8 competidores.</p>
 

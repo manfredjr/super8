@@ -29,6 +29,32 @@ function postTexto(string $chave): string
     return is_string($valor) ? $valor : '';
 }
 
+/**
+ * Le um campo de $_POST como inteiro, aceitando so uma string de digitos.
+ * (int) direto sobre o valor nao chega nem perto de bastar: (int) sobre um
+ * array nao vazio vira 1 (nunca a quantidade de elementos, um detalhe facil
+ * de esquecer, e sem aviso nenhum do PHP), e (int) sobre uma string que nao
+ * comeca com digito ("abc", uma string vazia) vira 0 tambem em silencio -
+ * as duas conversoes produzem um numero plausivel para um campo que na
+ * verdade veio errado ou ausente, e "games_a[]=9" ou "games_a=abc" seriam
+ * gravados como placar de verdade (1 e 0 games) sem nenhum aviso apontando
+ * o motivo. $padrao (fora da faixa de qualquer campo numerico real deste
+ * projeto, por isso o -1 default) e o que volta quando o valor enviado nao
+ * e uma string de digitos, forcando a validacao de faixa que cada chamador
+ * ja faz a recusar, em vez de aceitar um valor que nunca foi digitado de
+ * verdade. Nao aceita sinal nem ponto decimal: todo campo numerico deste
+ * projeto (id de linha, games) e inteiro nao negativo.
+ */
+function postInteiro(string $chave, int $padrao = -1): int
+{
+    $valor = $_POST[$chave] ?? null;
+    if (!is_string($valor) || !ctype_digit(trim($valor))) {
+        return $padrao;
+    }
+
+    return (int) trim($valor);
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf'])) {

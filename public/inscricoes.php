@@ -9,22 +9,13 @@ $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 // Passa $usuario, ja carregado por exigirLogin() ali em cima: evita uma
 // segunda consulta identica a users dentro de exigirDonoDoCampeonato.
 $campeonato = exigirDonoDoCampeonato($pdo, $id, $usuario);
-$erro = null;
-$erroClasse = 'erro';
 $nomeDigitado = '';
 
 // public/sortear.php e um endpoint proprio, sem tela: quando ele recusa um
 // sorteio (ja tem placar, por exemplo), volta pra ca com a mensagem numa
-// leitura de sessao de uso unico, em vez de responder uma frase solta sem
-// layout nem caminho de volta. So aceita a mensagem se for deste mesmo
-// campeonato - sem essa checagem, abrir duas abas em campeonatos diferentes
-// podia mostrar o aviso de um na tela do outro. unset() sempre, tenha
-// batido o id ou nao, pra nao deixar sobra apontando pro campeonato errado.
-if (isset($_SESSION['avisoSorteio']) && ($_SESSION['avisoSorteio']['id'] ?? null) === $id) {
-    $erro = $_SESSION['avisoSorteio']['mensagem'];
-    $erroClasse = 'aviso';
-}
-unset($_SESSION['avisoSorteio']);
+// leitura de sessao de uso unico. lerAviso() (config/renderizar.php) e o
+// ajudante comum a esta tela e a chaveamento.php.
+['erro' => $erro, 'erroClasse' => $erroClasse] = lerAviso('avisoSorteio', $id);
 
 // Uma vez sorteado, toda inscricao passa a ser referenciada por alguma
 // partida (dupla_a_j1, dupla_a_j2, dupla_b_j1, dupla_b_j2), e

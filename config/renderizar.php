@@ -37,3 +37,33 @@ function renderizar(string $view, string $titulo, array $dados = [], bool $marca
 
     require __DIR__ . '/../views/layout.php';
 }
+
+/**
+ * Le um aviso de sessao de uso unico deixado por um endpoint sem tela
+ * propria (sortear.php, placar.php) que precisou recusar algo, ou confirmar
+ * um sucesso, e voltar para a tela de origem em vez de responder uma frase
+ * solta sem layout nem caminho de volta. So aceita o aviso se ele foi
+ * guardado para o MESMO $id - sem essa checagem, abrir duas abas em
+ * campeonatos diferentes podia mostrar o aviso de um na tela do outro.
+ * unset() sempre, tenha batido o id ou nao, pra nao deixar sobra apontando
+ * pro campeonato errado.
+ *
+ * Devolve sempre as duas chaves 'erro' (string|null) e 'erroClasse'
+ * (string), prontas para entrar direto no array de $dados de renderizar().
+ * 'classe' ausente no aviso guardado (o caso de avisoSorteio, que sempre
+ * foi recusa de estado, nunca sucesso) vira 'aviso'.
+ */
+function lerAviso(string $chave, int $id): array
+{
+    $erro = null;
+    $erroClasse = 'erro';
+
+    $aviso = $_SESSION[$chave] ?? null;
+    if (is_array($aviso) && ($aviso['id'] ?? null) === $id) {
+        $erro = $aviso['mensagem'] ?? null;
+        $erroClasse = $aviso['classe'] ?? 'aviso';
+    }
+    unset($_SESSION[$chave]);
+
+    return ['erro' => $erro, 'erroClasse' => $erroClasse];
+}

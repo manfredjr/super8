@@ -5,7 +5,7 @@
 /** @var string|null $erro */
 /** @var string $erroClasse */
 ?>
-<?php if ($erro !== null): ?><p class="<?= $erroClasse ?>"><?= e($erro) ?></p><?php endif; ?>
+<?php if ($erro !== null): ?><p class="<?= e($erroClasse) ?>"><?= e($erro) ?></p><?php endif; ?>
 
 <?php if ($rodadas === []): ?>
   <p>As rodadas ainda não foram geradas. Cadastre os 8 competidores e faça o sorteio.</p>
@@ -14,8 +14,6 @@
   <?php if ($encerrado): ?>
     <p class="aviso">Campeonato encerrado. O placar não pode mais ser alterado.</p>
   <?php endif; ?>
-
-  <p>Semente do sorteio: <?= (int) $campeonato['seed_sorteio'] ?>. Guardar esse número permite refazer o mesmo sorteio e conferir o chaveamento.</p>
 
   <?php foreach ($rodadas as $rodada): ?>
     <h2>Rodada <?= (int) $rodada['numero'] ?></h2>
@@ -28,6 +26,7 @@
             <span class="dupla-nome"><?= e($partida['a1']) ?> e <?= e($partida['a2']) ?></span>
             <strong><?= $partida['games_a'] !== null ? (int) $partida['games_a'] : '-' ?></strong>
           </p>
+          <p class="versus">x</p>
           <p class="dupla">
             <span class="dupla-nome"><?= e($partida['b1']) ?> e <?= e($partida['b2']) ?></span>
             <strong><?= $partida['games_b'] !== null ? (int) $partida['games_b'] : '-' ?></strong>
@@ -42,6 +41,7 @@
               <input type="number" name="games_a" min="0" max="99" step="1" inputmode="numeric" required
                      value="<?= $partida['games_a'] !== null ? (int) $partida['games_a'] : '' ?>">
             </label>
+            <p class="versus">x</p>
             <label class="dupla">
               <span class="dupla-nome"><?= e($partida['b1']) ?> e <?= e($partida['b2']) ?></span>
               <input type="number" name="games_b" min="0" max="99" step="1" inputmode="numeric" required
@@ -55,4 +55,6 @@
   <?php endforeach; ?>
 
   <p><a href="classificacao.php?id=<?= (int) $campeonato['id'] ?>">Ver classificação</a></p>
+
+  <p class="nota-rodape">Semente do sorteio: <?= (int) $campeonato['seed_sorteio'] ?>. Guardar esse número permite refazer o mesmo sorteio e conferir o chaveamento.</p>
 <?php endif; ?>

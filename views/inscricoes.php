@@ -6,6 +6,7 @@
 /** @var bool $jaSorteado */
 /** @var bool $temPlacar */
 /** @var string $nomeDigitado */
+/** @var string $emailDigitado */
 $total = count($inscricoes);
 ?>
 <?php if ($erro !== null): ?><p class="<?= e($erroClasse) ?>"><?= e($erro) ?></p><?php endif; ?>
@@ -39,6 +40,8 @@ $total = count($inscricoes);
     <?= csrf_campo() ?>
     <label>Nome do competidor
       <input type="text" name="nome_exibicao" required maxlength="120" value="<?= e($nomeDigitado) ?>"></label>
+    <label>E-mail da conta (opcional)
+      <input type="email" name="email_jogador" maxlength="160" value="<?= e($emailDigitado) ?>"></label>
     <button type="submit">Adicionar</button>
   </form>
 <?php elseif ($temPlacar): ?>
@@ -55,7 +58,9 @@ $total = count($inscricoes);
 
 <p class="aviso">
   O nome do competidor aparece no chaveamento, na classificação e no ranking, junto da marca da MT como
-  apoiadora do evento. Quem entra só pelo nome, sem conta, não passa por cadastro nem aceita o termo de uso:
-  cabe a você informar essa pessoa de que o nome dela vai aparecer nessas telas. Sem conta, o competidor
-  também não acumula pontos no ranking entre eventos.
+  apoiadora do evento. Deixe o e-mail em branco para inscrever só pelo nome: a pessoa joga e aparece na
+  classificação deste evento, mas não passa por cadastro, não aceita o termo de uso e não acumula no ranking
+  entre eventos - cabe a você avisá-la de que o nome dela vai aparecer nessas telas. Preencha o e-mail de uma
+  conta já cadastrada para vincular o competidor a ela: a partir daí os games dele também entram no ranking
+  acumulado. Um e-mail sem conta ativa correspondente é recusado, em vez de virar convidado sem avisar.
 </p>

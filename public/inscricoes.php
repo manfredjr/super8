@@ -10,6 +10,7 @@ $id = getInteiro('id');
 // segunda consulta identica a users dentro de exigirDonoDoCampeonato.
 $campeonato = exigirDonoDoCampeonato($pdo, $id, $usuario);
 $nomeDigitado = '';
+$emailDigitado = '';
 
 // public/sortear.php e um endpoint proprio, sem tela: quando ele recusa um
 // sorteio (ja tem placar, por exemplo), volta pra ca com a mensagem numa
@@ -57,11 +58,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // string, e a validacao de campo obrigatorio recusa do jeito
             // certo.
             //
-            // Repovoa o campo com o que foi de fato enviado, para quem
-            // esbarrar num nome repetido nao precisar redigitar - mesma
-            // ideia de campeonato.php ao repovoar $dados antes do try.
+            // Repovoa os campos com o que foi de fato enviado, para quem
+            // esbarrar num nome repetido ou num e-mail sem conta nao
+            // precisar redigitar tudo - mesma ideia de campeonato.php ao
+            // repovoar $dados antes do try.
             $nomeDigitado = postTexto('nome_exibicao');
-            Campeonato::inscrever($pdo, $id, $nomeDigitado, null);
+            $emailDigitado = postTexto('email_jogador');
+            // inscreverComEmail() (src/Campeonato.php) e quem resolve o
+            // jogador_id a partir do e-mail: em branco vira convidado, do
+            // jeito que sempre foi; preenchido sem conta ativa correspondente
+            // lanca InvalidArgumentException, capturada abaixo do mesmo jeito
+            // que qualquer outro valor mal digitado neste formulario.
+            Campeonato::inscreverComEmail($pdo, $id, $nomeDigitado, $emailDigitado);
         }
         header('Location: inscricoes.php?id=' . $id);
         exit;
@@ -94,7 +102,8 @@ renderizar('inscricoes', 'Competidores de ' . $campeonato['nome'], [
     'inscricoes'   => $inscricoes,
     'erro'         => $erro,
     'erroClasse'   => $erroClasse,
-    'jaSorteado'   => $jaSorteado,
-    'temPlacar'    => $temPlacar,
-    'nomeDigitado' => $nomeDigitado,
+    'jaSorteado'    => $jaSorteado,
+    'temPlacar'     => $temPlacar,
+    'nomeDigitado'  => $nomeDigitado,
+    'emailDigitado' => $emailDigitado,
 ]);

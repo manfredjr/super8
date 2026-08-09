@@ -736,6 +736,110 @@ try {
 }
 Teste::verdade($erroAtualizarIdInexistente !== null, 'I2: atualizar com id inexistente lanca RuntimeException');
 
+// ============================================================================
+// Critico (revisao da tarefa 15): antes desta correcao, o unico chamador de
+// producao de inscrever() (public/inscricoes.php) passava jogador_id fixo
+// em nulo - toda inscricao real nascia convidada, e Ranking::acumulado, que
+// exige jogador_id preenchido, nunca tinha ninguem para mostrar, por mais
+// campeonatos que fossem encerrados. inscreverComEmail() e o metodo que
+// public/inscricoes.php passa a chamar de verdade; os tres casos abaixo
+// cobrem o contrato inteiro dele.
+// ============================================================================
+$campeonatoEmailId = Campeonato::criar($pdo, $organizadorId, [
+    'nome' => 'Campeonato com vinculo por e-mail', 'data_evento' => '2026-10-20',
+    'local' => 'Arena', 'custo' => '', 'descricao' => '',
+]);
+
+// Caso 1: sem e-mail continua convidado, jogador_id nulo, do jeito que
+// inscrever() sempre fez.
+$inscricaoConvidadoId = Campeonato::inscreverComEmail($pdo, $campeonatoEmailId, 'Convidado Email Vazio', '');
+$buscaConvidado = $pdo->prepare('SELECT jogador_id FROM inscricoes WHERE id = ?');
+$buscaConvidado->execute([$inscricaoConvidadoId]);
+Teste::igual(
+    null,
+    $buscaConvidado->fetch()['jogador_id'],
+    'inscreverComEmail: e-mail vazio inscreve como convidado (jogador_id nulo), igual a inscrever() direto'
+);
+
+// Caso 2: e-mail de conta ativa vincula o jogador_id certo. Digitado com
+// espacos e maiusculas de proposito, para provar que passa pela mesma
+// normalizacao que Auth::autenticar ja aplica (Auth::buscarPorEmailAtivo).
+$emailJogadorVinculado = 'jogadorvinculado' . random_int(1000, 9999) . '@exemplo.com';
+$jogadorEmailId = Auth::cadastrar($pdo, 'Jogador Vinculado', $emailJogadorVinculado, 'senhaforte123');
+
+$inscricaoVinculadaId = Campeonato::inscreverComEmail(
+    $pdo,
+    $campeonatoEmailId,
+    'Apelido na Quadra',
+    '  ' . strtoupper($emailJogadorVinculado) . '  '
+);
+$buscaVinculada = $pdo->prepare('SELECT jogador_id FROM inscricoes WHERE id = ?');
+$buscaVinculada->execute([$inscricaoVinculadaId]);
+Teste::igual(
+    $jogadorEmailId,
+    (int) $buscaVinculada->fetch()['jogador_id'],
+    'inscreverComEmail: e-mail de conta ativa vincula o jogador_id certo, mesmo com espacos e maiusculas'
+);
+
+// Caso 3: e-mail que nao bate com conta nenhuma recusa com
+// InvalidArgumentException, em vez de cadastrar como convidado em
+// silencio - um vinculo pedido que falha sem avisar e pior que uma recusa
+// clara.
+$totalAntesRecusa = count(Campeonato::listarInscricoes($pdo, $campeonatoEmailId));
+$erroEmailInexistente = null;
+try {
+    Campeonato::inscreverComEmail(
+        $pdo,
+        $campeonatoEmailId,
+        'Tentativa Sem Conta',
+        'naoexisteconta' . random_int(1000, 9999) . '@exemplo.com'
+    );
+} catch (InvalidArgumentException $excecao) {
+    $erroEmailInexistente = $excecao->getMessage();
+}
+Teste::verdade(
+    $erroEmailInexistente !== null,
+    'inscreverComEmail: e-mail sem conta ativa recusa com InvalidArgumentException, nao cadastra como convidado em silencio'
+);
+Teste::igual(
+    $totalAntesRecusa,
+    count(Campeonato::listarInscricoes($pdo, $campeonatoEmailId)),
+    'inscreverComEmail: a recusa por e-mail inexistente nao inseriu nenhuma inscricao nova'
+);
+
+// Bonus: conta DESATIVADA tambem recusa - a mesma checagem "ativa = 1" que
+// Auth::autenticar ja usa para bloquear login bloqueia o vinculo aqui.
+$emailInativoVinculo = 'inativovinculo' . random_int(1000, 9999) . '@exemplo.com';
+$jogadorInativoId = Auth::cadastrar($pdo, 'Jogador Inativo Vinculo', $emailInativoVinculo, 'senhaforte123');
+$pdo->prepare('UPDATE users SET ativo = 0 WHERE id = ?')->execute([$jogadorInativoId]);
+
+$erroContaInativa = null;
+try {
+    Campeonato::inscreverComEmail($pdo, $campeonatoEmailId, 'Tentativa Conta Inativa', $emailInativoVinculo);
+} catch (InvalidArgumentException $excecao) {
+    $erroContaInativa = $excecao->getMessage();
+}
+Teste::verdade(
+    $erroContaInativa !== null,
+    'inscreverComEmail: e-mail de conta desativada tambem recusa, nao so e-mail nunca cadastrado'
+);
+
+// O mesmo jogador_id inscrito duas vezes no mesmo campeonato via e-mail
+// continua caindo na RuntimeException de sempre (UNIQUE KEY
+// uk_camp_jogador), dentro de inscrever() - inscreverComEmail nao abre
+// nenhum atalho por fora dessa regra.
+$erroEmailDuplicado = null;
+try {
+    Campeonato::inscreverComEmail($pdo, $campeonatoEmailId, 'Apelido Repetido', $emailJogadorVinculado);
+} catch (RuntimeException $excecao) {
+    $erroEmailDuplicado = $excecao->getMessage();
+}
+Teste::igual(
+    'Este jogador já está inscrito neste campeonato.',
+    $erroEmailDuplicado,
+    'inscreverComEmail: vincular o mesmo jogador duas vezes no mesmo campeonato continua com a mensagem de sempre'
+);
+
 $pdo->rollBack();
 
 exit(Teste::resumo());

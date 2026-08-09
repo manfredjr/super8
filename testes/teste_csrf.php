@@ -27,6 +27,15 @@ Teste::igual('&#039;', e("'"), 'escapa apostrofo');
 Teste::igual('', e(null), 'nulo vira string vazia');
 Teste::igual('Joao &amp; Maria', e('Joao & Maria'), 'escapa e comercial');
 
+$_POST['campo_texto_normal'] = 'Nome com espaço';
+Teste::igual('Nome com espaço', postTexto('campo_texto_normal'), 'postTexto: string normal volta como veio');
+
+$_POST['campo_texto_array'] = ['x'];
+Teste::igual('', postTexto('campo_texto_array'), 'postTexto: array nao vira "Array" (Array to string conversion), cai em string vazia');
+
+$_GET['campo_texto_array'] = ['x'];
+Teste::igual('', getTexto('campo_texto_array'), 'getTexto: mesma guarda de postTexto, so que para $_GET - array cai em string vazia');
+
 Teste::igual(-1, postInteiro('campo_ausente'), 'postInteiro: campo ausente volta o padrao (-1)');
 
 $_POST['campo_digitos'] = '42';

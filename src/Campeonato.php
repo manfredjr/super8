@@ -260,6 +260,43 @@ final class Campeonato
         return $id;
     }
 
+    /**
+     * Mesma coisa que inscrever(), mas resolve o jogador_id a partir de um
+     * e-mail opcional em vez de recebe-lo pronto - e o caminho que
+     * public/inscricoes.php usa de verdade, porque inscrever() sozinho
+     * nunca tinha nenhum chamador de producao que passasse um jogador_id
+     * nao nulo (so os testes forjavam isso direto). Sem este metodo, toda
+     * inscricao real nascia convidada e o ranking acumulado nunca recebia
+     * ninguem, por mais eventos que fossem encerrados.
+     *
+     * E-mail em branco (string vazia depois do trim) inscreve como
+     * convidado, jogador_id nulo, do jeito que inscrever() sempre fez.
+     * E-mail preenchido que nao bate com nenhuma conta ATIVA recusa com
+     * InvalidArgumentException, em vez de cair para convidado em silencio:
+     * quem digitou um e-mail pediu vinculo com uma conta, e um vinculo que
+     * falha sem avisar e pior do que uma recusa clara. O mesmo jogador_id
+     * inscrito duas vezes no mesmo campeonato continua caindo na
+     * RuntimeException de sempre, dentro de inscrever() (UNIQUE KEY
+     * uk_camp_jogador).
+     */
+    public static function inscreverComEmail(PDO $pdo, int $campeonatoId, string $nomeExibicao, ?string $email): int
+    {
+        $email = trim((string) $email);
+        $jogadorId = null;
+
+        if ($email !== '') {
+            $jogador = Auth::buscarPorEmailAtivo($pdo, $email);
+            if ($jogador === null) {
+                throw new InvalidArgumentException(
+                    'Não existe conta ativa com esse e-mail. Deixe o campo de e-mail em branco para inscrever como convidado, sem acumular no ranking entre eventos.'
+                );
+            }
+            $jogadorId = (int) $jogador['id'];
+        }
+
+        return self::inscrever($pdo, $campeonatoId, $nomeExibicao, $jogadorId);
+    }
+
     public static function listarInscricoes(PDO $pdo, int $campeonatoId): array
     {
         $busca = $pdo->prepare(

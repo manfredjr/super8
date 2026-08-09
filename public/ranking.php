@@ -37,20 +37,32 @@ switch ($periodo) {
         $ate = date('Y-12-31');
 }
 
-// Confere o formato antes de repassar a Ranking::acumulado. O motor
-// (Validador::dataValida) ja trata qualquer coisa fora do formato AAAA-MM-DD
-// como "sem filtro" - inclusive uma data de calendario impossivel, tipo
-// 31 de fevereiro - e nunca deixa o valor cru chegar ao SQL fora de um
-// parametro preparado. Esta checagem aqui e so a mesma cautela que todo
-// campo vindo de fora do sistema recebe neste projeto: normalizar para nulo
-// o quanto antes, em vez de confiar que a camada seguinte vai lidar com
-// lixo.
+// Usa Validador::dataValida diretamente, a mesma checagem que
+// Ranking::acumulado ja aplica por dentro (formato AAAA-MM-DD E calendario
+// real via checkdate) - nao uma expressao regular local que so olhasse o
+// formato. So a forma (regex) nao bastava: "2026-02-31" bate no formato mas
+// nao existe no calendario, e sem o checkdate esse valor passava intacto
+// para o motor, que rejeitava por dentro e devolvia a consulta SEM aquele
+// lado do filtro - a tela mostrava o historico inteiro sem avisar que a
+// data digitada foi ignorada. $dataInvalida vira aviso na view exatamente
+// por isso: usuario digita algo, tela precisa dizer o que fez com aquilo.
+$dataInvalida = false;
 foreach (['de', 'ate'] as $campo) {
     $valor = $$campo;
-    if ($valor !== null && $valor !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $valor) !== 1) {
+    if ($valor !== null && $valor !== '' && !Validador::dataValida($valor)) {
         $$campo = null;
+        $dataInvalida = true;
     }
 }
+
+// Comeco depois do fim nunca pode filtrar nada (Ranking::acumulado exige
+// data_evento >= de E <= ate ao mesmo tempo), mas devolver a lista vazia
+// sem dizer o motivo aponta a causa para "nao ha campeonato no periodo"
+// quando o problema de verdade e o intervalo trocado. Calculado ANTES de
+// consultar o motor, e nao depois de ver a lista vazia: uma consulta que
+// legitimamente nao acha nada (periodo correto, so que sem evento) nao pode
+// acionar este aviso.
+$intervaloInvertido = $de !== null && $ate !== null && $de > $ate;
 
 $linhas = Ranking::acumulado($pdo, $de, $ate);
 
@@ -58,8 +70,10 @@ $linhas = Ranking::acumulado($pdo, $de, $ate);
 // discreta sempre no rodape (por isso o `true` aqui) e a destacada embutida
 // perto da tabela, chamada dentro da propria view com marcaMt(false).
 renderizar('ranking', 'Ranking acumulado', [
-    'linhas'  => $linhas,
-    'periodo' => $periodo,
-    'de'      => $de,
-    'ate'     => $ate,
+    'linhas'             => $linhas,
+    'periodo'            => $periodo,
+    'de'                 => $de,
+    'ate'                => $ate,
+    'dataInvalida'       => $dataInvalida,
+    'intervaloInvertido' => $intervaloInvertido,
 ], true);

@@ -126,6 +126,26 @@ final class Auth
         return $usuario;
     }
 
+    /**
+     * Procura uma conta ativa por e-mail, para vincular um jogador_id numa
+     * inscricao (Campeonato::inscreverComEmail). Devolve nulo quando nao
+     * existe conta ativa com esse e-mail - quem chama decide como recusar,
+     * em vez de cair para convidado em silencio. Nao confere senha nem
+     * grava nada, so olha o registro; a normalizacao (minusculo, trim) e a
+     * mesma que autenticar() ja aplica, para o mesmo e-mail digitado com
+     * variacao de maiuscula ou espaco encontrar a mesma conta.
+     */
+    public static function buscarPorEmailAtivo(PDO $pdo, string $email): ?array
+    {
+        $email = strtolower(trim($email));
+
+        $busca = $pdo->prepare('SELECT id, nome FROM users WHERE email = ? AND ativo = 1');
+        $busca->execute([$email]);
+        $usuario = $busca->fetch();
+
+        return $usuario === false ? null : $usuario;
+    }
+
     public static function registrarFalha(PDO $pdo, string $email): void
     {
         $email = strtolower(trim($email));

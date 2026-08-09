@@ -42,8 +42,10 @@ th, td { padding: .5rem; border-bottom: 1px solid var(--borda); text-align: left
    Classificacao) sem isso medem so a altura da propria linha de texto,
    bem abaixo dos 44px minimos que o projeto usa para input e botao por
    causa do uso no celular na beira da quadra. inline-block deixa o
-   padding vertical contar para a altura clicavel/tocavel. */
-td a { display: inline-block; padding: .5rem 0; }
+   padding vertical contar para a altura clicavel/tocavel: com a fonte
+   base de 16px/1.5 (24px de linha), .625rem (10px) em cima e embaixo
+   fecha exatamente os 44px. */
+td a { display: inline-block; padding: .625rem 0; }
 .erro { padding: .75rem; border-radius: 6px; background: #fee2e2; color: #991b1b; }
 .aviso { padding: .75rem; border-radius: 6px; background: #fef9c3; color: #713f12; }
 .partida { border: 1px solid var(--borda); border-radius: 8px; padding: .75rem; margin-bottom: .75rem; }

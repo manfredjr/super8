@@ -4,7 +4,11 @@
 /** @var bool|null $somenteLeitura */
 $somenteLeitura = $somenteLeitura ?? false;
 ?>
-<?php if ($erro !== null): ?><p class="erro"><?= e($erro) ?></p><?php endif; ?>
+<?php if ($erro !== null): ?>
+  <?php // Campeonato encerrado e estado, nao erro que a pessoa cometeu no
+        // formulario - usa a classe de aviso, nao a de erro de validacao. ?>
+  <p class="<?= $somenteLeitura ? 'aviso' : 'erro' ?>"><?= e($erro) ?></p>
+<?php endif; ?>
 
 <form method="post">
   <?= csrf_campo() ?>

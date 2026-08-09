@@ -65,7 +65,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$somenteLeitura) {
     }
 }
 
-$titulo = $id > 0 ? 'Editar campeonato' : 'Novo campeonato';
+if ($somenteLeitura) {
+    $titulo = 'Campeonato encerrado';
+} elseif ($id > 0) {
+    $titulo = 'Editar campeonato';
+} else {
+    $titulo = 'Novo campeonato';
+}
 
 renderizar('campeonato_form', $titulo, [
     'campeonato'     => $campeonato,

@@ -342,7 +342,23 @@ Teste::igual(
 $inscricaoRemovivel = Campeonato::inscrever($pdo, $campeonatoId2, 'Removivel', null);
 Teste::igual(2, count(Campeonato::listarInscricoes($pdo, $campeonatoId2)), 'segundo campeonato tem 2 inscritos');
 
-Campeonato::removerInscricao($pdo, $campeonatoId, $inscricaoRemovivel);
+// Rodada de revisao da tarefa 12: antes, um DELETE que afetava zero linhas
+// (id de outro campeonato, ou id que nao existe) devolvia void como se
+// tivesse removido algo, e quem chama redirecionava como sucesso sem ter
+// apagado nada. Agora vira RuntimeException tipada, do mesmo jeito que
+// Campeonato::atualizar ja recusa "Campeonato nao encontrado." por
+// rowCount() zero.
+$erroRemocaoCampeonatoErrado = null;
+try {
+    Campeonato::removerInscricao($pdo, $campeonatoId, $inscricaoRemovivel);
+} catch (RuntimeException $excecao) {
+    $erroRemocaoCampeonatoErrado = $excecao->getMessage();
+}
+Teste::igual(
+    'Competidor não encontrado.',
+    $erroRemocaoCampeonatoErrado,
+    'removerInscricao com o campeonato errado recusa com RuntimeException, em vez de responder como se tivesse apagado'
+);
 Teste::igual(
     2,
     count(Campeonato::listarInscricoes($pdo, $campeonatoId2)),

@@ -31,12 +31,17 @@ if ($id > 0) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$somenteLeitura) {
     csrf_conferir();
 
+    // postTexto(), nao (string) ($_POST[...] ?? ''): o `??` cobre chave
+    // ausente, mas nao cobre um campo enviado como array
+    // ("nome[]=x", por exemplo) - (string) sobre array emite "Array to
+    // string conversion", vaza o caminho do servidor no aviso, e devolve o
+    // literal "Array", que passaria reto pela validacao de tamanho.
     $dados = [
-        'nome'        => (string) ($_POST['nome'] ?? ''),
-        'data_evento' => (string) ($_POST['data_evento'] ?? ''),
-        'local'       => (string) ($_POST['local'] ?? ''),
-        'custo'       => (string) ($_POST['custo'] ?? ''),
-        'descricao'   => (string) ($_POST['descricao'] ?? ''),
+        'nome'        => postTexto('nome'),
+        'data_evento' => postTexto('data_evento'),
+        'local'       => postTexto('local'),
+        'custo'       => postTexto('custo'),
+        'descricao'   => postTexto('descricao'),
     ];
 
     // Repovoa o formulario com o que foi de fato enviado, para quem errar um

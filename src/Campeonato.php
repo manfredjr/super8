@@ -315,6 +315,17 @@ final class Campeonato
                 throw $excecao;
             }
 
+            // Sem este rowCount(), um id de inscricao que nao existe (ou que
+            // existe mas pertence a OUTRO campeonato - o mesmo caso que a
+            // condicao campeonato_id = ? acima ja bloqueia) faz o DELETE
+            // afetar zero linhas e o metodo devolver void como se tivesse
+            // removido algo. Quem chama entao redireciona como sucesso sem
+            // ter apagado nada, a mesma armadilha que Campeonato::atualizar
+            // ja fecha com o mesmo padrao.
+            if ($comando->rowCount() === 0) {
+                throw new RuntimeException('Competidor não encontrado.');
+            }
+
             if ($transacaoPropria) {
                 $pdo->commit();
             }

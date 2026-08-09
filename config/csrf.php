@@ -13,6 +13,22 @@ function e(?string $texto): string
     return htmlspecialchars($texto ?? '', ENT_QUOTES, 'UTF-8');
 }
 
+/**
+ * Le um campo de $_POST como texto, nunca como array. `?? ''` sozinho cobre
+ * a chave ausente, mas nao cobre o tipo errado: um formulario aceita
+ * "campo[]=x" por construcao (varios campos com o mesmo name), e um (string)
+ * direto sobre um array emite "Array to string conversion" - alem de vazar
+ * o caminho do servidor no aviso, o valor devolvido e o literal "Array", que
+ * passa reto pela validacao de tamanho e cadastra o texto errado de verdade.
+ * is_string() aqui fecha isso: qualquer coisa que nao seja string vira
+ * string vazia, e a validacao de campo obrigatorio recusa do jeito certo.
+ */
+function postTexto(string $chave): string
+{
+    $valor = $_POST[$chave] ?? '';
+    return is_string($valor) ? $valor : '';
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf'])) {

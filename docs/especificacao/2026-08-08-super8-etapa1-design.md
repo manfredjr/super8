@@ -277,6 +277,10 @@ Levantados na revisao da camada de autenticacao. Ficam registrados porque sao de
 
 **O contador de tentativas e por e-mail, sem dimensao por IP.** Isso deixa duas frentes abertas. A primeira e o ataque de senha unica testada contra muitas contas: mil contas viram mil contadores separados, e nenhum deles chega perto do limite. A segunda e o bloqueio usado como arma: quem souber o e-mail de alguem erra cinco vezes e tranca a conta, e como o contador so zera num login bem-sucedido, que e justamente o que esta bloqueado, um script mantem a conta inutilizavel. Resolver exige contador por IP e por conta ao mesmo tempo, o que fica para depois do sistema estar em uso e com dado real de trafego.
 
+**A inscricao por e-mail responde se existe conta com aquele endereco.** Para vincular um competidor ao ranking, o organizador digita o e-mail dele, e o sistema precisa dizer com clareza quando nao existe conta ativa com aquele endereco, senao o vinculo falharia em silencio e a pessoa sumiria do ranking sem ninguem entender por que. O efeito colateral e que qualquer organizador logado consegue descobrir se um e-mail tem conta aqui, tentando um por vez.
+
+A exposicao e limitada: exige estar logado, revela apenas presenca de conta e nunca o nome de quem a tem, e nao ha como fechar sem quebrar o comportamento que o produto precisa ter. Fica registrada como aceita, e nao como esquecimento. Se um dia o cadastro deixar de ser aberto a qualquer um, isso muda de peso e merece revisao.
+
 **A tela nao pode dizer "conta bloqueada".** Como o contador cria linha ate para e-mail que nao existe, uma mensagem especifica de bloqueio entregaria quais e-mails tem conta. A mensagem de erro do login e sempre a mesma.
 
 **Todo cadastro vira organizador.** Nao existe, nesta etapa, forma de criar conta de jogador puro pela tela. O jogador entra no sistema como inscricao, com ou sem conta. Quando o login com Google chegar na etapa 2, a conta criada por ele nasce sem `e_organizador`, e essa separacao passa a valer.
